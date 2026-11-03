@@ -17,7 +17,7 @@ def parse_ini(text):
         raise ValueError("Automatic axis changes require a self-contained INI")
     parser = configparser.ConfigParser(interpolation=None, strict=False)
     parser.optionxform = str
-    section, seen = "", set()
+    section, seen = "", {}
     for line in text.splitlines():
         value = line.strip()
         if not value or value.startswith(("#", ";")):
@@ -25,10 +25,14 @@ def parse_ini(text):
         if value.startswith("[") and value.endswith("]"):
             section = value[1:-1]
         elif "=" in value:
-            key = value.split("=", 1)[0].strip()
-            if (section, key) in seen and not (section == "HAL" and key in HAL_KEYS):
+            key, setting = (part.strip() for part in value.split("=", 1))
+            if (
+                (section, key) in seen
+                and seen[section, key] != setting
+                and not (section == "HAL" and key in HAL_KEYS)
+            ):
                 raise ValueError("Ambiguous repeated INI setting: " + key)
-            seen.add((section, key))
+            seen[section, key] = setting
     parser.read_string(text)
     return parser
 
@@ -94,6 +98,47 @@ def patch_ini(text, settings, replacements, rotary_sections):
     return "".join(output)
 
 
+def initial_rotary_parameters(ini, axis):
+    """Use the operator-confirmed rotary transmission on the named Zhulong profile."""
+    if (
+        ini.get("EMC", "MACHINE", fallback="") != "烛龙V2"
+        or ini.get("HMOT", "CARD0", fallback="") != "hm2_7i92.0"
+        or ini.get("BETTERCNC_HOMING", "PROFILE", fallback="") != "zhulong-v2"
+        or ini.get("BETTERCNC_HOMING", "CONFIGURATION_REVISION", fallback="")
+        not in ("zhulong-xyz-20261026", "zhulong-xyz-v5-20261026")
+    ):
+        return {}, {}
+    # Confirmed: 1600 pulses/motor turn and 100 motor turns/table turn on A/C.
+    # Low initial rates and generous pulse timing are commissioning defaults,
+    # not measurements or acceptance of motor polarity and mechanical zero.
+    limits = {
+        "MIN_LIMIT": "-90" if axis == "A" else "-1e99",
+        "MAX_LIMIT": "90" if axis == "A" else "1e99",
+        "MAX_VELOCITY": "1",
+        "MAX_ACCELERATION": "2",
+    }
+    joint = {
+        **limits,
+        "STEP_SCALE": format(1600 * 100 / 360, ".12g"),
+        "STEPGEN_MAXVEL": "1.25",
+        "STEPGEN_MAXACCEL": "2.5",
+        "FERROR": "1",
+        "MIN_FERROR": "0.1",
+        "DIRSETUP": "10000",
+        "DIRHOLD": "10000",
+        "STEPLEN": "5000",
+        "STEPSPACE": "5000",
+        "HOME": "0",
+        "HOME_OFFSET": "0",
+        "HOME_SEARCH_VEL": "0",
+        "HOME_LATCH_VEL": "0",
+        "HOME_USE_INDEX": "NO",
+        # Exclude unreferenced rotary joints from HOME ALL. No switch is wired.
+        "HOME_SEQUENCE": "1000",
+    }
+    return limits, joint
+
+
 def rotary_parameters(ini, axis):
     # Reuse stored calibration; XYZ pulse/mm values are never rotary pulse/degree values.
     joint_section = "JOINT_" + axis
@@ -102,6 +147,8 @@ def rotary_parameters(ini, axis):
     joint = dict(ini.items(joint_section)) if ini.has_section(joint_section) else {}
     axis_section = "AXIS_" + axis
     limits = dict(ini.items(axis_section)) if ini.has_section(axis_section) else {}
+    if not ini.has_section(joint_section) and not ini.has_section(axis_section):
+        limits, joint = initial_rotary_parameters(ini, axis)
     if axis == "A":
         limits.update(MIN_LIMIT="-90", MAX_LIMIT="90")
         joint.update(MIN_LIMIT="-90", MAX_LIMIT="90")
@@ -174,9 +221,8 @@ def rotary_parameters(ini, axis):
     if not math.isfinite(float(joint["STEP_SCALE"])) or float(joint["STEP_SCALE"]) == 0:
         raise ValueError(f"{axis}.STEP_SCALE must be calibrated in pulses per degree")
     if (
-        abs(int(joint["HOME_SEQUENCE"])) > 100
-        or joint["HOME_USE_INDEX"].upper() != "NO"
-    ):
+        abs(int(joint["HOME_SEQUENCE"])) > 100 and int(joint["HOME_SEQUENCE"]) != 1000
+    ) or joint["HOME_USE_INDEX"].upper() != "NO":
         raise ValueError(f"{axis} requires a configured non-index homing sequence")
     if float(joint["HOME_SEARCH_VEL"]) or float(joint["HOME_LATCH_VEL"]):
         raise ValueError(

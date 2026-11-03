@@ -247,6 +247,67 @@ class AxisProfileCliTests(unittest.TestCase):
         self.assertNotEqual(self.invoke("request", "5").returncode, 0)
         self.assertEqual(self.ini.read_bytes(), before)
 
+    def test_identical_duplicate_ini_values_are_preserved_but_conflicts_rejected(self):
+        repeated = self.original.replace(
+            "GEOMETRY = XYZ", "GEOMETRY = XYZ\nGEOMETRY = XYZ"
+        )
+        self.ini.write_text(repeated)
+        self.assertEqual(self.apply(5).returncode, 0)
+        self.assertEqual(self.apply(3).returncode, 0)
+        self.assertEqual(self.ini.read_text(), repeated)
+        conflicting = repeated.replace("GEOMETRY = XYZ\n", "GEOMETRY = XZY\n", 1)
+        self.ini.write_text(conflicting)
+        self.assertNotEqual(self.invoke("request", "5").returncode, 0)
+        self.assertEqual(self.ini.read_text(), conflicting)
+
+    def test_captured_zhulong_first_use_generates_confirmed_rotary_transmission(self):
+        captured = json.loads(
+            (Path(__file__).parent / "fixtures/zhulong-installed-v4.json").read_text()
+        )
+        for name, lines in captured.items():
+            (self.machine / name).write_text("".join(lines))
+        original = "".join(captured["烛龙V2.ini"])
+        self.ini.write_text(original)
+        before = configparser.ConfigParser(strict=False)
+        before.read_string(original)
+        for count in (4, 5, 3):
+            result = self.apply(count)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            parser = configparser.ConfigParser(strict=False)
+            parser.read_string(self.ini.read_text())
+            for section in (
+                "AXIS_X",
+                "AXIS_Y",
+                "AXIS_Z",
+                "JOINT_0",
+                "JOINT_1",
+                "JOINT_2",
+            ):
+                self.assertEqual(dict(parser[section]), dict(before[section]))
+            if count == 3:
+                self.assertEqual(self.ini.read_text(), original)
+                continue
+            for joint in range(3, count):
+                name = f"JOINT_{joint}"
+                self.assertAlmostEqual(
+                    parser.getfloat(name, "STEP_SCALE"), 160000 / 360
+                )
+                self.assertEqual(parser.getfloat(name, "MAX_VELOCITY"), 1)
+                self.assertEqual(parser.getfloat(name, "HOME_SEARCH_VEL"), 0)
+                self.assertEqual(parser.getfloat(name, "HOME_LATCH_VEL"), 0)
+                self.assertEqual(parser.getint(name, "HOME_SEQUENCE"), 1000)
+            self.assertEqual(parser.getfloat("AXIS_C", "MIN_LIMIT"), -1e99)
+            self.assertEqual(parser.getfloat("AXIS_C", "MAX_LIMIT"), 1e99)
+            if count == 5:
+                self.assertEqual(parser.getfloat("AXIS_A", "MIN_LIMIT"), -90)
+                self.assertEqual(parser.getfloat("JOINT_3", "MAX_LIMIT"), 90)
+            for key in ("MOTOR_MAPPING_VERIFIED", "MOTOR_DIRECTIONS_VERIFIED"):
+                self.assertEqual(parser.get("BETTERCNC_HOMING", key), "NO")
+        self.ini.write_text(original + "\n[AXIS_C]\nMAX_VELOCITY = 7\n")
+        self.assertNotEqual(self.invoke("request", "4").returncode, 0)
+        self.ini.write_text(original.replace("MACHINE = 烛龙V2", "MACHINE = Other"))
+        self.assertNotEqual(self.invoke("request", "5").returncode, 0)
+
     def test_apply_requires_lock_stopped_stack_revision_and_successful_backup(self):
         revision = self.revision()
         for fault in ("missing-lock", "running", "backup"):

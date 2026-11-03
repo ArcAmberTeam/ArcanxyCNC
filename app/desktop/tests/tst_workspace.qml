@@ -53,6 +53,8 @@ TestCase {
         click("settings-tab-machine");
         click("machining-axes-5");
         compare(backend.axisProfiles.requests, [5]);
+        verify(control("machining-axes-3").selected);
+        verify(!control("machining-axes-5").selected);
         verify(!control("machining-profile-apply").enabled);
         verify(!control("machining-axes-3").enabled);
         verify(control("machining-axis-status").text.indexOf("尚未生效") >= 0);
@@ -62,6 +64,7 @@ TestCase {
         verify(control("machining-axis-status").text.indexOf("尚未生效") >= 0);
         backend.update({axes: ["X", "Y", "Z", "A", "C"]});
         tryVerify(() => control("machining-axis-status").text.indexOf("已生效") >= 0);
+        verify(control("machining-axes-5").selected);
     }
     function test_axisProfilesRequireReadyProfileAndIdleConnectedMachine() {
         click("open-settings");
@@ -79,10 +82,42 @@ TestCase {
         backend.axisProfiles.state = Object.assign({}, backend.axisProfiles.state, {
             profiles: [{axis_count: 4, axes: "XYZC", available: false, reason: "缺少转轴参数：C.joint.STEP_SCALE"}]
         });
+        backend.axisProfiles.message = "INI / HAL 已写入";
         verify(!control("machining-profile-apply").enabled);
         verify(control("machining-profile-reason").text.indexOf("C.joint.STEP_SCALE") >= 0);
         click("machining-axes-4");
         compare(backend.axisProfiles.requests.length, 0);
+    }
+    function test_rotaryJointJogUsesAngularRateAndActualMapping() {
+        backend.update({
+            axes: ["X", "Y", "Z", "A", "C"], joints: [0, 1, 2, 3, 4], jointCount: 5,
+            motionMode: "joint", homed: [false, false, false, false, false],
+            jointMap: {X: [0], Y: [1], Z: [2], A: [3], C: [4]},
+            axisLimits: {A: {maxVelocity: 1}, C: {maxVelocity: 0.5}}
+        });
+        click("workspace-page-control");
+        compare(control("manualState").jogVelocity, 600);
+        for (const selection of [{joint: 3, speed: 1}, {joint: 4, speed: 0.5}]) {
+            click("joint" + selection.joint);
+            compare(control("jogVelocity").unit, "度/分钟");
+            compare(control("jogVelocity").to, selection.speed * 60);
+            compare(control("manualState").jogVelocity, selection.speed * 60);
+            const plus = control("jogPlus");
+            mousePress(plus, plus.width / 2, plus.height / 2);
+            compare(lastRequest().id, "jog.start");
+            compare(lastRequest().payload.axis, selection.joint);
+            compare(lastRequest().payload.mode, "joint");
+            compare(lastRequest().payload.velocity, selection.speed);
+            mouseRelease(plus, plus.width / 2, plus.height / 2);
+            control("workspace").forceActiveFocus();
+            keyPress(Qt.Key_Right);
+            compare(lastRequest().payload.axis, selection.joint);
+            compare(lastRequest().payload.velocity, selection.speed);
+            keyRelease(Qt.Key_Right);
+        }
+        click("joint0");
+        compare(control("jogVelocity").unit, "毫米/分钟");
+        compare(control("manualState").jogVelocity, 30);
     }
     function test_initialLayoutAndRealProgram() {
         compare(control("workspace").width, 1100);
