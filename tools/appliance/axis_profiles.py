@@ -50,7 +50,7 @@ def trusted_read(path):
 
 def relative_file(name):
     if not isinstance(name, str):
-        raise ValueError("Profile filenames must be strings")
+        raise TypeError("Profile filenames must be strings")
     path = PurePosixPath(name)
     if (
         len(path.parts) != 1
@@ -69,7 +69,7 @@ class AxisProfileStore:
         launcher_bytes = trusted_read(CONFIG / "launcher.json")
         launcher = json.loads(launcher_bytes)
         if not isinstance(launcher, dict) or not isinstance(launcher.get("ini"), str):
-            raise ValueError("Invalid installed launcher configuration")
+            raise TypeError("Invalid installed launcher configuration")
         path = Path(launcher["ini"])
         if not path.is_absolute():
             path = CONFIG / path
@@ -330,7 +330,7 @@ def install_integration():
     except FileNotFoundError:
         previous = {}
     if not isinstance(previous, dict):
-        raise ValueError("Invalid maintenance registration record")
+        raise TypeError("Invalid maintenance registration record")
     contents = {name: trusted_read(sources / name) for name in destinations}
     for name, directory in destinations.items():
         try:

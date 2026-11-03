@@ -33,7 +33,8 @@ class DesktopTests(unittest.TestCase):
             f"with Path({str(calls)!r}).open('a') as f:\n"
             "    f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
             "if sys.argv[1] == 'request':\n"
-            "    print(json.dumps(dict(phase='scheduled', axis_count=int(sys.argv[2]), started_at=time.time())))\n"
+            "    print(json.dumps(dict(phase='scheduled', axis_count=int(sys.argv[2]), "
+            "started_at=time.time())))\n"
             "else:\n"
             f"    print(Path({str(status)!r}).read_text())\n",
             encoding="utf-8",
