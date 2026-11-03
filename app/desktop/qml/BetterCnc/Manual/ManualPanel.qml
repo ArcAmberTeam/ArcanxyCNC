@@ -41,7 +41,10 @@ Rectangle {
         const limits = (machine.axisLimits || {})[jogAxis] || {};
         const axisMaximum = Number(limits.maxVelocity || 0);
         const linearMaximum = Number(machine.jogMaxVelocity || machine.maxVelocity || 0);
-        if (rotaryJog) return axisMaximum > 0 ? axisMaximum * 60 : 0;
+        // Derive the unit and limit from the same axis to avoid a transient zero
+        // while dependent bindings settle when returning from C/A to X/Y/Z.
+        if (["A", "B", "C"].indexOf(jogAxis) >= 0)
+            return axisMaximum > 0 ? axisMaximum * 60 : 0;
         return (axisMaximum > 0 ? Math.min(axisMaximum, linearMaximum) : linearMaximum) * 60;
     }
     readonly property string jogSpeedUnit: rotaryJog ? "度/分钟"

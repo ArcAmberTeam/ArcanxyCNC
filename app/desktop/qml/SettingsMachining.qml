@@ -17,7 +17,7 @@ Column {
     property int targetAxisCount: activeAxes.length >= 3 && activeAxes.length <= 5 ? activeAxes.length : 3
     readonly property var targetProfile: (profileState.profiles || []).find(item => item.axis_count === targetAxisCount) || ({})
     readonly property bool switching: operation.phase === "scheduled" || operation.phase === "switching"
-    readonly property bool idle: machine.connected && machine.powered === false
+    readonly property bool idle: !!machine.connected && machine.powered === false
         && machine.busy === false && !machine.paused && machine.spindleSpeed === 0
         && machine.spindleDirection === 0
     function selectAxes(count) {
@@ -82,7 +82,7 @@ Column {
             onClicked: root.axisProfiles.request(root.targetAxisCount)
         }
         UiText {
-            visible: root.machine.connected && !root.idle
+            visible: !!root.machine.connected && !root.idle
             width: parent.width; wrapMode: Text.WordWrap; color: Theme.warning
             text: "请先停止加工、关闭主轴和机床使能，再应用轴数配置。"
         }
