@@ -184,6 +184,8 @@ TestCase {
     }
     function test_touchOffCompensationNotice(data) {
         click(control("workspace-page-control"));
+        waitForRendering(window.contentItem);
+        verify(control(data.button).visible);
         control("manualState").touchTarget = data.target;
         const before = backend.requests.length;
         click(control(data.button));
