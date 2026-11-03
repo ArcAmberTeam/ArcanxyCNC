@@ -195,9 +195,12 @@ class DesktopBackend(QObject):
         errors = snapshot.get("errors", [])
         if errors and errors != self._last_errors:
             latest = errors[-1]
-            self.errorOccurred.emit(
-                str(latest.get("message", latest) if isinstance(latest, dict) else latest)
+            signal = (
+                self.noticeOccurred
+                if isinstance(latest, dict) and latest.get("error") is False
+                else self.errorOccurred
             )
+            signal.emit(str(latest.get("message", latest) if isinstance(latest, dict) else latest))
         self._last_errors = copy.deepcopy(errors)
         state = snapshot.get("commandState")
         detail = snapshot.get("commandMessage", "")

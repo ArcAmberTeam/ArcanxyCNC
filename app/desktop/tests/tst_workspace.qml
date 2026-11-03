@@ -82,8 +82,8 @@ TestCase {
         compare(control("toolbar-machine.estop").enabled, false);
         compare(control("homeAll").enabled, false);
         compare(control("mistCoolant").enabled, false);
-        tryCompare(control("dialogHost"), "visible", true);
-        compare(control("dialogHost").description, "控制器不可用");
+        tryCompare(control("errorDialog"), "visible", true);
+        compare(control("errorDialog").rawMessage, "控制器不可用");
         keyClick(Qt.Key_Escape);
         const before = backend.requests.length;
         keyClick(Qt.Key_R);
@@ -137,11 +137,11 @@ TestCase {
     }
     function test_connectingDoesNotReportFailure() {
         backend.update({connected: false, connecting: true, message: "正在连接"});
-        verify(!control("dialogHost").visible);
+        verify(!control("errorDialog").visible);
         compare(control("jogPlus").enabled, false);
         backend.update({connecting: false, message: "socket 不可用"});
-        tryCompare(control("dialogHost"), "visible", true);
-        compare(control("dialogHost").description, "socket 不可用");
+        tryCompare(control("errorDialog"), "visible", true);
+        compare(control("errorDialog").rawMessage, "socket 不可用");
     }
     function test_mdiAndHistory() {
         keyClick(Qt.Key_F5);
@@ -330,9 +330,64 @@ TestCase {
     }
     function test_backendErrorIsPresented() {
         backend.errorOccurred("当前状态不允许执行此指令");
-        const dialog = control("dialogHost");
+        const dialog = control("errorDialog");
         tryCompare(dialog, "visible", true);
-        compare(dialog.description, "当前状态不允许执行此指令");
+        compare(dialog.rawMessage, "当前状态不允许执行此指令");
+        compare(control("error-title").text, "操作结果需要确认");
+    }
+    function test_errorQueueDoesNotReplayMachineActions() {
+        const before = backend.requests.length;
+        backend.errorOccurred("Linear move on line 18 would exceed Y's negative limit");
+        backend.errorOccurred("joint 1 on limit switch error");
+        backend.errorOccurred("joint 1 on limit switch error");
+        const dialog = control("errorDialog");
+        tryCompare(dialog, "opened", true);
+        compare(dialog.notices.length, 2);
+        compare(control("error-title").text, "刀路超出机床行程");
+        keyClick(Qt.Key_R);
+        compare(backend.requests.length, before);
+        keyClick(Qt.Key_Escape);
+        tryCompare(dialog, "opened", true);
+        compare(dialog.rawMessage, "joint 1 on limit switch error");
+        compare(dialog.notices.length, 1);
+        keyClick(Qt.Key_Escape);
+        tryCompare(dialog, "visible", false);
+        compare(backend.requests.length, before);
+        backend.errorOccurred("joint 1 on limit switch error");
+        tryCompare(dialog, "visible", true);
+    }
+    function test_errorPresentationAtOperatorScreenSize_data() {
+        return [{tag: "target", width: 1024, height: 600}, {tag: "minimum", width: 760, height: 640}];
+    }
+    function test_errorPresentationAtOperatorScreenSize(data) {
+        window.width = data.width; window.height = data.height;
+        backend.errorOccurred("自动加工不允许跳过带 / 的程序行");
+        const dialog = control("errorDialog");
+        tryCompare(dialog, "opened", true);
+        verify(waitForRendering(dialog.contentItem));
+        verify(dialog.x >= 0 && dialog.y >= 0);
+        verify(dialog.x + dialog.width <= window.width);
+        verify(dialog.y + dialog.height <= window.height);
+        const animation = control("error-animation");
+        tryCompare(animation, "status", Image.Ready);
+        click("error-animation-toggle");
+        compare(animation.paused, true);
+        click("error-details-toggle");
+        compare(control("error-details").text, "自动加工不允许跳过带 / 的程序行");
+        compare(control("error-details").textFormat, TextEdit.PlainText);
+    }
+    function test_previewFailureHasExplanationAndDoesNotRepeatOnProgress() {
+        backend.program.previewError = "Cannot do g1 with zero feed rate";
+        const dialog = control("errorDialog");
+        tryCompare(dialog, "opened", true);
+        compare(dialog.explanation.animation, "feed-zero");
+        keyClick(Qt.Key_Escape);
+        tryCompare(dialog, "visible", false);
+        backend.program.selectedLine = 2;
+        verify(!dialog.visible);
+        backend.program.previewBusy = true;
+        backend.program.previewBusy = false;
+        tryCompare(dialog, "visible", true);
     }
 
     function test_jogRejectedWithoutPermittedState_data() {

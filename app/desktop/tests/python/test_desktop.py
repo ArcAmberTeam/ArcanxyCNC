@@ -21,6 +21,19 @@ APP = QGuiApplication.instance() or QGuiApplication([])
 
 
 class DesktopTests(unittest.TestCase):
+    def test_operator_notices_are_not_presented_as_failures(self):
+        errors, notices = [], []
+        self.backend.errorOccurred.connect(errors.append)
+        self.backend.noticeOccurred.connect(notices.append)
+        self.state["errors"] = [{"message": "Operator information", "error": False}]
+        self.wait(lambda: notices == ["Operator information"])
+        self.assertEqual(errors, [])
+        self.state["errors"].append({"message": "joint 1 on limit switch error", "error": True})
+        self.wait(lambda: errors == ["joint 1 on limit switch error"])
+        QTest.qWait(200)
+        self.assertEqual(notices, ["Operator information"])
+        self.assertEqual(errors, ["joint 1 on limit switch error"])
+
     def test_mesa_pending_request_rechecks_the_latest_root_status(self):
         for phase in ("verifying_identity", "writing", "programmed_pending_power_cycle"):
             self.backend.close()

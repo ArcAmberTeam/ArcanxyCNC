@@ -2,5 +2,6 @@ module BetterCnc.Chrome
 ChromeActions 1.0 ChromeActions.qml
 ChromeBar 1.0 ChromeBar.qml
 DialogHost 1.0 DialogHost.qml
+ErrorDialog 1.0 ErrorDialog.qml
 internal MenuEntries MenuEntries.qml
 MachineStatus 1.0 MachineStatus.qml

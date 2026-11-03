@@ -32,8 +32,11 @@ Rectangle {
     readonly property string axesKey: (machine.axes || []).join(",")
     readonly property var configuredAxes: axesKey ? axesKey.split(",") : []
     property string lastConnectionMessage: ""
+    readonly property string previewFailure: program && !program.previewBusy && program.previewError
+        ? program.filePath + "\n" + program.previewError : ""
+    onPreviewFailureChanged: if (previewFailure) errors.present(program.previewError, "preview")
     property var activeJogKeys: ({})
-    readonly property bool popupActive: dialogs.visible || openFile.visible || saveFile.visible || programPicker.visible
+    readonly property bool popupActive: errors.visible || dialogs.visible || openFile.visible || saveFile.visible || programPicker.visible
     signal quitRequested()
     focus: true
 
@@ -45,7 +48,7 @@ Rectangle {
     function showBackendFailure(title, message) {
         if (dialogs.visible && (dialogs.actionId === "file.edit" || dialogs.actionId === "tool.edit"))
             dialogs.validationError = message;
-        else dialogs.openMessage(title, message);
+        errors.present(message, title === "连接失败" ? "connection" : "operation");
     }
     function syncMachine() {
         const axes = machine.axes || [];
@@ -295,6 +298,7 @@ Rectangle {
         toolTableText: workspace.backend ? workspace.backend.toolTableText : ""
         onSubmitted: (actionId, payload) => workspace.requestCommand(actionId, payload)
     }
+    ErrorDialog { id: errors }
     NativeDialogs.FileDialog {
         id: openFile
         objectName: "openProgramDialog"

@@ -1,7 +1,13 @@
 pragma Singleton
 import QtQml
+import "ErrorExplanations.js" as ErrorCopy
 
 QtObject {
+    function explainError(raw, context) { return ErrorCopy.explain(raw, context); }
+    function errorIllustration(animation, poster) {
+        const name = ErrorCopy.animations.indexOf(animation) >= 0 ? animation : "unknown";
+        return Qt.resolvedUrl("assets/error-" + name + (poster ? ".png" : ".gif"));
+    }
     readonly property var axes: [
       "X",
       "Y",

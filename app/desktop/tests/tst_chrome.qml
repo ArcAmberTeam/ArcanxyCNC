@@ -254,6 +254,12 @@ TestCase {
         compare(control("dialog-editor").text, draft);
         compare(error.text, "控制服务连接已断开");
         backend.update({connected: true, message: ""});
+        const failures = control("errorDialog");
+        tryCompare(failures, "opened", true);
+        keyClick(Qt.Key_Escape);
+        tryCompare(failures, "opened", true);
+        keyClick(Qt.Key_Escape);
+        tryCompare(failures, "visible", false);
         click(control("dialog-submit"));
         compare(dialog.validationError, "");
         compare(dialog.actionId, data.action);
