@@ -2,6 +2,25 @@ import QtQml
 
 // Explicit test fixture: records requested actions without operating a controller.
 QtObject {
+    property QtObject axisProfiles: QtObject {
+        property bool available: true
+        property bool busy: false
+        property string message: ""
+        property var state: ({
+            profiles: [
+                {axis_count: 3, axes: "XYZ", available: true, reason: ""},
+                {axis_count: 4, axes: "XYZC", available: true, reason: ""},
+                {axis_count: 5, axes: "XYZAC", available: true, reason: ""}
+            ],
+            configured_axis_count: 3, operation: null
+        })
+        property var requests: []
+        function request(count) {
+            requests = requests.concat([count]);
+            state = Object.assign({}, state, {operation: {phase: "scheduled", axis_count: count}});
+            return true;
+        }
+    }
     property QtObject mesaFlash: QtObject {
         property bool available: true
         property var state: ({phase: "not_checked", message: ""})

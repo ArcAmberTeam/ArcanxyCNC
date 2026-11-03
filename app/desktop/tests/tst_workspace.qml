@@ -47,6 +47,43 @@ TestCase {
         click("settings-back");
     }
     function lastRequest() { return backend.requests[backend.requests.length - 1]; }
+    function test_selectingAxesAutomaticallyWritesThroughMaintenance() {
+        backend.update({powered: false});
+        click("open-settings");
+        click("settings-tab-machine");
+        click("machining-axes-5");
+        compare(backend.axisProfiles.requests, [5]);
+        verify(!control("machining-profile-apply").enabled);
+        verify(!control("machining-axes-3").enabled);
+        verify(control("machining-axis-status").text.indexOf("尚未生效") >= 0);
+        backend.axisProfiles.state = Object.assign({}, backend.axisProfiles.state, {
+            configured_axis_count: 5, operation: {phase: "configured", axis_count: 5}
+        });
+        verify(control("machining-axis-status").text.indexOf("尚未生效") >= 0);
+        backend.update({axes: ["X", "Y", "Z", "A", "C"]});
+        tryVerify(() => control("machining-axis-status").text.indexOf("已生效") >= 0);
+    }
+    function test_axisProfilesRequireReadyProfileAndIdleConnectedMachine() {
+        click("open-settings");
+        click("settings-tab-machine");
+        click("machining-axes-4");
+        verify(!control("machining-profile-apply").enabled);
+        backend.update({powered: false});
+        tryCompare(control("machining-profile-apply"), "enabled", true);
+        backend.update({spindleSpeed: 1000});
+        tryCompare(control("machining-profile-apply"), "enabled", false);
+        backend.update({spindleSpeed: 0, connected: false});
+        verify(!control("machining-profile-apply").enabled);
+        verify(control("machining-axis-status").text.indexOf("待确认") >= 0);
+        backend.update({connected: true});
+        backend.axisProfiles.state = Object.assign({}, backend.axisProfiles.state, {
+            profiles: [{axis_count: 4, axes: "XYZC", available: false, reason: "缺少转轴参数：C.joint.STEP_SCALE"}]
+        });
+        verify(!control("machining-profile-apply").enabled);
+        verify(control("machining-profile-reason").text.indexOf("C.joint.STEP_SCALE") >= 0);
+        click("machining-axes-4");
+        compare(backend.axisProfiles.requests.length, 0);
+    }
     function test_initialLayoutAndRealProgram() {
         compare(control("workspace").width, 1100);
         compare(control("manualPanel").width, 304);
@@ -888,7 +925,7 @@ TestCase {
         click("open-settings");
         const page = control("settingsPage"), sidebar = control("settingsSidebar");
         const names = ["about", "interface", "display", "machine"];
-        const labels = ["关于本机", "界面与显示", "刀路与视图", "加工选型"];
+        const labels = ["关于本机", "界面与显示", "刀路与视图", "加工设置"];
         for (let i = 0; i < names.length; ++i) {
             const item = control("settings-tab-" + names[i]);
             compare(item.text, labels[i]);

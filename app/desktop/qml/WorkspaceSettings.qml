@@ -14,6 +14,7 @@ Rectangle {
     property var firmwareUpdater: null
     property var mesaUpdate: null
     property var mesaFlash: null
+    property var axisProfiles: null
     property string interfaceMode: "professional"
     property string section: "about"
     signal backRequested()
@@ -56,7 +57,7 @@ Rectangle {
         {id: "about", text: "关于本机"},
         {id: "interface", text: "界面与显示"},
         {id: "display", text: "刀路与视图"},
-        {id: "machine", text: "加工选型"}
+        {id: "machine", text: "加工设置"}
     ]
     readonly property string sectionTitle: sections.find(item => item.id === section)?.text || "设置"
     Rectangle {
@@ -150,6 +151,7 @@ Rectangle {
                 width: parent.width
                 visible: root.section === "machine"
                 actions: root.actions
+                axisProfiles: root.axisProfiles
                 onCommandRequested: (actionId, payload) => root.commandRequested(actionId, payload)
             }
         }

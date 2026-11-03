@@ -370,6 +370,13 @@ def main():
     for name in ("/usr/lib/betterlinuxcnc", "/usr/share/betterlinuxcnc", "/usr/share/doc/betterlinuxcnc-qt"):
         ownership(name, "root", "root", 0o755)
     verify_xsession_entry()
+    for name, directory in (
+        ("betterlinuxcnc-axis-profile@.service", "/usr/lib/systemd/system"),
+        ("00-betterlinuxcnc-axis-settings.rules", "/usr/share/polkit-1/rules.d"),
+    ):
+        installed = Path(directory) / name
+        ownership(str(installed), "root", "root", 0o644, directory=False)
+        require(installed.read_bytes() == (Path("/usr/lib/betterlinuxcnc/appliance") / name).read_bytes(), "Axis maintenance integration was not registered")
     require(
         run("dpkg-query", "-S", "/usr/bin/mesaflash").stdout.strip() == "mesaflash: /usr/bin/mesaflash",
         "The fixed mesaflash command must come from the distribution package",

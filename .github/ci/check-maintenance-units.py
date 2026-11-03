@@ -15,6 +15,7 @@ def main():
     for relative in (
         "app/platform/updater/packaging/betterlinuxcnc-system-update.service.in",
         "app/platform/mesa-update/packaging/betterlinuxcnc-mesa-flash.service.in",
+        "tools/appliance/packaging/betterlinuxcnc-axis-profile@.service.in",
     ):
         parser = configparser.ConfigParser(interpolation=None, strict=False)
         parser.optionxform = str

@@ -21,6 +21,71 @@ APP = QGuiApplication.instance() or QGuiApplication([])
 
 
 class DesktopTests(unittest.TestCase):
+    def axis_profile_peer(self, record):
+        self.backend.close()
+        root = Path(self.temporary.name)
+        status = root / "axis-status.json"
+        status.write_text(json.dumps(record))
+        calls = root / "axis-calls.jsonl"
+        script = root / "axis-cli.py"
+        script.write_text(
+            "import json, sys, time\nfrom pathlib import Path\n"
+            f"with Path({str(calls)!r}).open('a') as f:\n"
+            "    f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "if sys.argv[1] == 'request':\n"
+            "    print(json.dumps(dict(phase='scheduled', axis_count=int(sys.argv[2]), started_at=time.time())))\n"
+            "else:\n"
+            f"    print(Path({str(status)!r}).read_text())\n",
+            encoding="utf-8",
+        )
+        self.backend = DesktopBackend(
+            socket_path=self.peer.path,
+            axis_profile_command=[sys.executable, str(script)],
+        )
+        self.addCleanup(self.backend.close)
+        adapter = self.backend.axisProfiles
+        self.wait(lambda: calls.exists() and not adapter.busy)
+        return adapter, status, calls
+
+    def test_axis_profiles_use_fixed_cli_and_wait_for_new_operation(self):
+        record = {
+            "schema_version": 1,
+            "component": "axis-profile",
+            "profiles": [
+                {"axis_count": count, "axes": axes, "available": True, "reason": ""}
+                for count, axes in ((3, "XYZ"), (4, "XYZC"), (5, "XYZAC"))
+            ],
+            "configured_axis_count": 3,
+            "operation": {"phase": "configured", "axis_count": 5, "started_at": 1},
+        }
+        adapter, status, calls = self.axis_profile_peer(record)
+        self.assertFalse(adapter.request(6))
+        self.assertTrue(adapter.request(5))
+        self.assertFalse(adapter.request(4))
+        self.wait(lambda: not adapter.busy)
+        self.assertEqual(adapter.state["operation"]["phase"], "scheduled")
+        adapter.refresh()
+        self.wait(lambda: not adapter.busy)
+        self.assertEqual(adapter.state["operation"]["phase"], "scheduled")
+        record["operation"] = {"phase": "configured", "axis_count": 5, "started_at": time.time()}
+        record["configured_axis_count"] = 5
+        status.write_text(json.dumps(record))
+        adapter.refresh()
+        self.wait(lambda: adapter.state["operation"]["phase"] == "configured")
+        commands = [json.loads(line) for line in calls.read_text().splitlines()]
+        self.assertEqual(commands.count(["request", "5"]), 1)
+        self.assertTrue(all(command in (["status"], ["request", "5"]) for command in commands))
+        self.assertFalse(self.actions())
+        self.assertNotEqual(self.backend.snapshot.get("axes"), ["X", "Y", "Z", "A", "C"])
+
+    def test_axis_profiles_reject_invalid_status_without_enabling_requests(self):
+        adapter, _status, calls = self.axis_profile_peer({"component": "wrong"})
+        self.assertEqual(adapter.state["profiles"], [])
+        self.assertFalse(adapter.request(5))
+        self.assertEqual(
+            [json.loads(line) for line in calls.read_text().splitlines()], [["status"]]
+        )
+
     def test_operator_notices_are_not_presented_as_failures(self):
         errors, notices = [], []
         self.backend.errorOccurred.connect(errors.append)

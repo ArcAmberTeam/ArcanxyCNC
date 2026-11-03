@@ -1,0 +1,46 @@
+# Rotary-channel wiring fragment for the XYZAC joint order, not a full HAL setup.
+# Requires joint.3=A, joint.4=C, configured pid.a/pid.c and at least five Mesa
+# step generators. Schedule both PIDs between motion and the Mesa write function.
+# The active XYZ configuration does not source this file.
+# Calibrated JOINT_3/4 drive parameters must be supplied by the integrating INI;
+# no rotary scale, polarity, speed, homing or C travel is inferred here.
+# Feedback below is step-generator position, not measured motor position.
+
+#--------#
+# BEGIN: ZhulongRotaryChannelMapping
+# Configure both channels before connecting either enable signal.
+setp hm2_7i92.0.stepgen.04.enable false
+setp hm2_7i92.0.stepgen.03.enable false
+
+# A: logical joint.3 -> physical Axis4 -> stepgen.04.
+setp hm2_7i92.0.stepgen.04.position-scale [JOINT_3]STEP_SCALE
+setp hm2_7i92.0.stepgen.04.dirsetup [JOINT_3]DIRSETUP
+setp hm2_7i92.0.stepgen.04.dirhold [JOINT_3]DIRHOLD
+setp hm2_7i92.0.stepgen.04.steplen [JOINT_3]STEPLEN
+setp hm2_7i92.0.stepgen.04.stepspace [JOINT_3]STEPSPACE
+setp hm2_7i92.0.stepgen.04.maxvel [JOINT_3]STEPGEN_MAXVEL
+setp hm2_7i92.0.stepgen.04.maxaccel [JOINT_3]STEPGEN_MAXACCEL
+setp hm2_7i92.0.stepgen.04.step_type 0
+setp hm2_7i92.0.stepgen.04.control-type 1
+
+# C: logical joint.4 -> physical Axis3 -> stepgen.03.
+setp hm2_7i92.0.stepgen.03.position-scale [JOINT_4]STEP_SCALE
+setp hm2_7i92.0.stepgen.03.dirsetup [JOINT_4]DIRSETUP
+setp hm2_7i92.0.stepgen.03.dirhold [JOINT_4]DIRHOLD
+setp hm2_7i92.0.stepgen.03.steplen [JOINT_4]STEPLEN
+setp hm2_7i92.0.stepgen.03.stepspace [JOINT_4]STEPSPACE
+setp hm2_7i92.0.stepgen.03.maxvel [JOINT_4]STEPGEN_MAXVEL
+setp hm2_7i92.0.stepgen.03.maxaccel [JOINT_4]STEPGEN_MAXACCEL
+setp hm2_7i92.0.stepgen.03.step_type 0
+setp hm2_7i92.0.stepgen.03.control-type 1
+
+net a-pos-cmd joint.3.motor-pos-cmd => pid.a.command
+net a-pos-fb hm2_7i92.0.stepgen.04.position-fb => pid.a.feedback joint.3.motor-pos-fb
+net a-output pid.a.output => hm2_7i92.0.stepgen.04.velocity-cmd
+net c-pos-cmd joint.4.motor-pos-cmd => pid.c.command
+net c-pos-fb hm2_7i92.0.stepgen.03.position-fb => pid.c.feedback joint.4.motor-pos-fb
+net c-output pid.c.output => hm2_7i92.0.stepgen.03.velocity-cmd
+net a-enable joint.3.amp-enable-out => pid.a.enable hm2_7i92.0.stepgen.04.enable
+net c-enable joint.4.amp-enable-out => pid.c.enable hm2_7i92.0.stepgen.03.enable
+# END: ZhulongRotaryChannelMapping
+#--------#
