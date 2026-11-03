@@ -111,6 +111,7 @@ TestCase {
         else compare(lastRequest().id, id);
     }
     function test_menuAndDialogFocus() {
+        click(control("workspace-page-control"));
         const menubar = control("main-menubar");
         const chrome = control("workspace-chrome");
         click(menubar.itemAt(2));
@@ -182,6 +183,7 @@ TestCase {
         ];
     }
     function test_touchOffCompensationNotice(data) {
+        click(control("workspace-page-control"));
         control("manualState").touchTarget = data.target;
         const before = backend.requests.length;
         click(control(data.button));

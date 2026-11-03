@@ -1,12 +1,19 @@
 import QtQuick
 import BetterCnc.Ui 1.0
 
-// QtDragon-inspired: persistent manual controls, preview/DRO above the program.
+//--------//
+// BEGIN: ProfessionalPageLayout
 WorkspaceLayout {
-    readonly property real contentX: sidebarWidth + Theme.gap
+    property string page: "preview"
+    readonly property bool advancedPage: page === "advanced"
+    readonly property real contentX: manualVisible ? sidebarWidth + Theme.gap : 0
     readonly property real contentWidth: width - contentX
     manualRect: Qt.rect(0, 0, sidebarWidth, height)
-    previewRect: Qt.rect(contentX, 0, contentWidth, height - programHeight - 7)
-    programRect: Qt.rect(contentX, height - programHeight, contentWidth, programHeight)
-    separatorVisible: true
+    manualVisible: page !== "preview"
+    programRect: Qt.rect(contentX, 0, contentWidth, height)
+    previewVisible: !advancedPage
+    programVisible: advancedPage
+    previewRect: Qt.rect(contentX, 0, contentWidth, height)
 }
+// END: ProfessionalPageLayout
+//--------//
