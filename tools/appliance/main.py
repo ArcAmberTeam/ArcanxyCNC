@@ -1,6 +1,7 @@
 """Root-only account provisioning and explicit machine/policy administration."""
 
 import argparse
+import configparser
 import functools
 import json
 import os
@@ -17,11 +18,23 @@ import _backup
 import _homing
 import _machine
 import _policy
+import axis_profiles
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
+    profiles = commands.add_parser(
+        "axis-profile",
+        help="Automatically write the installed machine axis configuration",
+    )
+    operations = profiles.add_subparsers(dest="operation", required=True)
+    operations.add_parser("status")
+    for operation in ("request", "switch-system", "prepare-system", "apply-system"):
+        command = operations.add_parser(operation)
+        command.add_argument("axes", type=int, choices=(3, 4, 5))
+        if operation == "apply-system":
+            command.add_argument("revision")
     commands.add_parser(
         "plan", help="Show fixed paths and account policy without changing the host"
     )
@@ -71,6 +84,12 @@ def main():
         "activate", help="Install fixed login policies; does not restart the display"
     )
     args = parser.parse_args()
+    if args.action == "axis-profile":
+        result = axis_profiles.run(
+            args.operation, getattr(args, "axes", None), getattr(args, "revision", None)
+        )
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     configure_profile = None
     if args.action in ("stage", "prepare"):
         travel = _homing.measured_travel(args.zhulong_homing_travel_mm)
@@ -116,6 +135,7 @@ def main():
         raise ValueError("Host provisioning requires a Linux root maintenance session")
     if args.action == "provision":
         _accounts.provision()
+        axis_profiles.install_integration()
         print("Machine axis migration: " + _axis_upgrade.upgrade())
         if Path("/run/systemd/system").is_dir():
             _accounts.run("/usr/bin/systemctl", "daemon-reload")
@@ -172,6 +192,13 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
+    except (
+        ValueError,
+        KeyError,
+        TypeError,
+        OSError,
+        configparser.Error,
+        subprocess.SubprocessError,
+    ) as error:
         print(f"Appliance provisioning refused: {error}", file=sys.stderr)
         raise SystemExit(1) from None

@@ -1,0 +1,25 @@
+[Unit]
+Description=Write %i-axis INI/HAL settings through guarded maintenance
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=@CMAKE_INSTALL_FULL_SBINDIR@/betterlinuxcnc-appliance axis-profile switch-system %i
+WorkingDirectory=/
+UMask=0077
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root
+TimeoutStartSec=infinity
+NoNewPrivileges=yes
+PrivateTmp=no
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/etc/betterlinuxcnc /var/cache/betterlinuxcnc /var/lib/betterlinuxcnc
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_READ_SEARCH CAP_CHOWN
+AmbientCapabilities=CAP_SETUID CAP_SETGID CAP_DAC_READ_SEARCH CAP_CHOWN

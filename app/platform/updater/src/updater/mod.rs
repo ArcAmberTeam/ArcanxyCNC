@@ -41,6 +41,12 @@ enum Action {
     /// Fixed root-only guard for the independent Mesa flashing process.
     #[command(hide = true)]
     MesaMaintenance,
+    /// Fixed root-only guard for automatically writing the machine axis count.
+    #[command(hide = true)]
+    AxisMaintenance {
+        #[arg(value_parser = clap::value_parser!(u8).range(3..=5))]
+        axes: u8,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -78,6 +84,9 @@ pub(super) fn run() -> Result<()> {
     if matches!(options.command, Action::MesaMaintenance) {
         return maintenance::run();
     }
+    if let Action::AxisMaintenance { axes } = options.command {
+        return maintenance::run_axes(axes);
+    }
     let store = storage::Store::open()?;
     if matches!(options.command, Action::Status) {
         if let Some(status) = broker::visible_status(&store)? {
@@ -107,6 +116,7 @@ pub(super) fn run() -> Result<()> {
         }
         Action::ApplySystem => unreachable!(),
         Action::MesaMaintenance => unreachable!(),
+        Action::AxisMaintenance { .. } => unreachable!(),
         Action::Status => unreachable!(),
     };
     if let Err(error) = &result {
@@ -137,6 +147,23 @@ fn command(path: impl AsRef<Path>) -> std::process::Command {
 #[cfg(test)]
 mod cli_tests {
     use super::*;
+    #[test]
+    fn axis_maintenance_accepts_only_a_fixed_axis_count() {
+        for count in ["3", "4", "5"] {
+            assert!(Options::try_parse_from(["updater", "axis-maintenance", count]).is_ok());
+        }
+        for count in ["0", "2", "6", "-1", "/tmp/machine.ini", "3;id"] {
+            assert!(Options::try_parse_from(["updater", "axis-maintenance", count]).is_err());
+        }
+        assert!(Options::try_parse_from([
+            "updater",
+            "axis-maintenance",
+            "5",
+            "--ini",
+            "/tmp/machine.ini"
+        ])
+        .is_err());
+    }
     #[test]
     fn install_rejects_paths_urls_commands_and_legacy_privileged_apply() {
         for extra in [

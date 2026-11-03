@@ -1,11 +1,14 @@
-// The operator can start only the two fixed update services, with no payload arguments.
+// The operator may start only fixed maintenance units; no paths or commands are accepted.
 polkit.addRule(function(action, subject) {
     if (subject.user !== "linuxcnc") {
         return polkit.Result.NOT_HANDLED;
     }
     if (action.id === "org.freedesktop.systemd1.manage-units"
         && (action.lookup("unit") === "betterlinuxcnc-system-update.service"
-            || action.lookup("unit") === "betterlinuxcnc-mesa-flash.service")
+            || action.lookup("unit") === "betterlinuxcnc-mesa-flash.service"
+            || action.lookup("unit") === "betterlinuxcnc-axis-profile@3.service"
+            || action.lookup("unit") === "betterlinuxcnc-axis-profile@4.service"
+            || action.lookup("unit") === "betterlinuxcnc-axis-profile@5.service")
         && action.lookup("verb") === "start") {
         return polkit.Result.YES;
     }

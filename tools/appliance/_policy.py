@@ -72,7 +72,10 @@ cnc-maint ALL=(root) NOPASSWD: /usr/lib/betterlinuxcnc/manage-ini/pa-config ""
     if (subject.user !== "linuxcnc" && subject.user !== "cnc-maint" && subject.user !== "teto") return;
     if (subject.user === "linuxcnc" && action.id === "org.freedesktop.systemd1.manage-units"
         && (action.lookup("unit") === "betterlinuxcnc-system-update.service"
-            || action.lookup("unit") === "betterlinuxcnc-mesa-flash.service")
+            || action.lookup("unit") === "betterlinuxcnc-mesa-flash.service"
+            || action.lookup("unit") === "betterlinuxcnc-axis-profile@3.service"
+            || action.lookup("unit") === "betterlinuxcnc-axis-profile@4.service"
+            || action.lookup("unit") === "betterlinuxcnc-axis-profile@5.service")
         && action.lookup("verb") === "start") return polkit.Result.YES;
     return polkit.Result.NO;
 });

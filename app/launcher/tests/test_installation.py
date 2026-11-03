@@ -261,6 +261,7 @@ class InstallationTests(unittest.TestCase):
             )
             self.assertTrue((stage / "usr/sbin/betterlinuxcnc-appliance").is_file())
             self.assertTrue((stage / "usr/lib/betterlinuxcnc/appliance/maintenance.py").is_file())
+            self.assertTrue((stage / "usr/lib/betterlinuxcnc/appliance/axis_profiles.py").is_file())
             result = subprocess.run(
                 [
                     sys.executable,
@@ -285,6 +286,11 @@ class InstallationTests(unittest.TestCase):
                 "betterlinuxcnc-mesa-flash.service",
             ):
                 self.assertTrue((stage / "usr/lib/systemd/system" / unit).is_file())
+            for name in (
+                "betterlinuxcnc-axis-profile@.service",
+                "00-betterlinuxcnc-axis-settings.rules",
+            ):
+                self.assertTrue((stage / "usr/lib/betterlinuxcnc/appliance" / name).is_file())
             self.assertTrue(
                 (stage / "usr/share/polkit-1/rules.d/49-betterlinuxcnc-update.rules").is_file()
             )

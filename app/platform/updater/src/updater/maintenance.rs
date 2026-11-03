@@ -1,5 +1,5 @@
-//! Public, zero-argument process contract for a single guarded Mesa operation.
-//! This module owns controller quiescence; the Mesa process owns firmware I/O.
+//! Guarded maintenance contracts for Mesa firmware and automatic axis configuration.
+//! This module owns controller quiescence; independent writers own device/config I/O.
 use super::{broker, install, system::PausedLauncher, Event, Result};
 use std::fs::File;
 use std::io::{Read, Write};
@@ -12,6 +12,75 @@ use std::time::Duration;
 
 const FLASH: &str = "/usr/bin/betterlinuxcnc-mesa-flash";
 const PROTOCOL: &str = "betterlinuxcnc-mesa-maintenance-v1";
+
+//--------//
+// BEGIN: AxisProfileMaintenance
+pub(super) fn run_axes(axes: u8) -> Result<()> {
+    if !cfg!(target_os = "linux")
+        || unsafe { libc::getuid() } != 0
+        || unsafe { libc::geteuid() } != 0
+        || !(3..=5).contains(&axes)
+    {
+        return Err("Axis profile switching requires the fixed root service".into());
+    }
+    const APPLIANCE: &str = "/usr/sbin/betterlinuxcnc-appliance";
+    let store = broker::root_store()?;
+    let lock = store.lock()?;
+    let (manager, socket, uid) = broker::machine_context()?;
+    install::preflight(&socket, &manager, uid)?;
+    let count = axes.to_string();
+    let prepared = super::command(APPLIANCE)
+        .args(["axis-profile", "prepare-system", &count])
+        .stdin(Stdio::null())
+        .output()?;
+    if !prepared.status.success() || prepared.stdout.len() > 4096 {
+        return Err(
+            "Axis parameters are incomplete or unsupported; controller was not stopped".into(),
+        );
+    }
+    let prepared: serde_json::Value = serde_json::from_slice(&prepared.stdout)?;
+    let revision = prepared["revision"]
+        .as_str()
+        .filter(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or("Invalid profile revision")?;
+    let original = install::preflight(&socket, &manager, uid)?;
+    let launcher = PausedLauncher::stop(manager, original)?;
+    let result: Result<()> = (|| {
+        if install::present(&socket)? || install::present(Path::new("/tmp/linuxcnc.lock"))? {
+            return Err("Control has not stopped; profile switch refused".into());
+        }
+        let descriptor = duplicate(lock.as_raw_fd())?;
+        let raw = descriptor.as_raw_fd();
+        let mut apply = super::command(APPLIANCE);
+        // The independent profile writer holds the same update lock through its
+        // own configuration lease, stopped checks, backup and atomic write.
+        unsafe {
+            apply.pre_exec(move || {
+                if libc::dup2(raw, 4) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let status = apply
+            .args(["axis-profile", "apply-system", &count, revision])
+            .stdin(Stdio::null())
+            .status()?;
+        if !status.success() {
+            return Err("Profile switch did not complete; control remains stopped".into());
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        launcher.retain_stop_mask();
+        return Err(error);
+    }
+    // Resume only a previously running launcher. Actual axis feedback is still
+    // required before the UI can report that the selected profile is active.
+    launcher.resume()
+}
+// END: AxisProfileMaintenance
+//--------//
 
 pub(super) fn run() -> Result<()> {
     if !cfg!(target_os = "linux")
