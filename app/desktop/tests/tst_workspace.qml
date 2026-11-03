@@ -87,11 +87,86 @@ TestCase {
     function test_initialLayoutAndRealProgram() {
         compare(control("workspace").width, 1100);
         compare(control("manualPanel").width, 304);
-        compare(control("programSeparator").height, 7);
-        compare(control("mdiTab").text, "手动输入 [F5]");
+        verify(!control("manualPanel").visible);
+        verify(!control("programSeparator").visible);
+        verify(!control("programPanel").visible);
+        verify(!control("manualTab").visible && !control("mdiTab").visible);
         compare(window.title, "test.ngc");
         verify(!control("dialogHost").visible);
         compare(control("feedOverride").value, 100);
+    }
+    function test_professionalPages_data() {
+        return [760, 1024, 1440].map(width => ({tag: String(width), w: width}));
+    }
+    function test_professionalPages(data) {
+        window.width = data.w; window.height = 600;
+        backend.update({powered: false, estop: true, capabilities: {"machine.mode": false}});
+        const requestsBeforeNavigation = backend.requests.length;
+        const navigation = control("workspaceNavigation");
+        const manual = control("manualPanel");
+        const program = control("programPanel");
+        const preview = control("toolpathPanel");
+        click("workspace-page-advanced");
+        compare(control("manualState").controlTab, "mdi");
+        verify(!control("manualTab").visible && !control("mdiTab").visible);
+        verify(control("mdiCommand").visible);
+        for (const name of ["feedOverride", "rapidOverride", "spindleOverride", "jogVelocity", "activeCodes"])
+            verify(!control(name).visible);
+        verify(program.visible && !preview.visible);
+        compare(program.y, manual.y);
+        compare(program.height, manual.height);
+        verify(program.x >= manual.x + manual.width);
+        verify(program.width > 0);
+        verify(navigation.mapToItem(window.contentItem, navigation.width, 0).x
+            <= manual.mapToItem(window.contentItem, 0, 0).x);
+        const pages = ["preview", "control", "advanced"].map(page => control("workspace-page-" + page));
+        verify(pages[0].y + pages[0].height <= pages[1].y);
+        verify(pages[1].y + pages[1].height <= pages[2].y);
+        control("mdiCommand").text = "G0 X25";
+        backend.program.selectedLine = 3;
+        click("workspace-page-control");
+        compare(control("manualState").controlTab, "manual");
+        verify(control("feedOverride").visible);
+        verify(!control("manualTab").visible && !control("mdiTab").visible);
+        verify(preview.visible && !program.visible);
+        compare(preview.height, manual.height);
+        click("workspace-page-preview");
+        verify(preview.visible && !program.visible);
+        verify(!manual.visible);
+        compare(preview.x, 0);
+        compare(preview.width, preview.parent.width);
+        compare(preview.height, preview.parent.height);
+        verify(!control("programSeparator").visible);
+        click("workspace-page-advanced");
+        compare(control("mdiCommand").text, "G0 X25");
+        compare(backend.program.selectedLine, 3);
+        click("open-settings");
+        click("settings-back");
+        verify(control("workspace-page-advanced").selected);
+        verify(program.visible && !preview.visible);
+        click("workspace-page-preview");
+        keyClick(Qt.Key_F5);
+        verify(control("workspace-page-advanced").selected);
+        compare(control("mdiCommand").text, "G0 X25");
+        keyClick(Qt.Key_F3);
+        verify(control("workspace-page-control").selected);
+        compare(backend.requests.length, requestsBeforeNavigation);
+    }
+    function test_previewPageStopsJogAndBlocksHiddenManualShortcuts() {
+        click("workspace-page-control");
+        control("workspace").forceActiveFocus();
+        keyPress(Qt.Key_Right);
+        compare(lastRequest().id, "jog.start");
+        const stops = backend.stopCount;
+        click("workspace-page-preview");
+        verify(backend.stopCount > stops);
+        verify(!control("manualPanel").visible);
+        keyRelease(Qt.Key_Right);
+        const before = backend.requests.length;
+        control("workspace").forceActiveFocus();
+        for (const key of [Qt.Key_Left, Qt.Key_Right, Qt.Key_Home, Qt.Key_End]) keyClick(key);
+        compare(backend.requests.length, before);
+        verify(!control("dialogHost").visible);
     }
     function test_kiosk_uses_bounded_program_picker_and_disables_exit() {
         window.kioskMode = true;
@@ -127,6 +202,7 @@ TestCase {
         compare(backend.requests.length, before);
     }
     function test_homingDisabledReasonIsVisibleWithoutEnablingTheButton() {
+        click("workspace-page-control");
         backend.update({
             capabilities: {"machine.home-all": false},
             homeAllUnavailableReason: "回零未配置：XYZ 电机通道与实机轴尚未核验"
@@ -193,6 +269,7 @@ TestCase {
         verify(!control("dialogHost").visible);
     }
     function test_machineChecksWaitForSnapshot() {
+        click("workspace-page-control");
         const item = control("mistCoolant");
         compare(item.checked, false);
         click("mistCoolant");
@@ -203,6 +280,7 @@ TestCase {
         tryCompare(item, "checked", true);
     }
     function test_jogPressReleaseAndStateLoss() {
+        click("workspace-page-control");
         click("axisY");
         const plus = control("jogPlus");
         mousePress(plus, plus.width / 2, plus.height / 2);
@@ -221,6 +299,7 @@ TestCase {
         mouseRelease(plus, plus.width / 2, plus.height / 2);
     }
     function test_acceptedJogKeepsReleaseAvailable() {
+        click("workspace-page-control");
         const plus = control("jogPlus");
         mousePress(plus, plus.width / 2, plus.height / 2);
         compare(lastRequest().id, "jog.start");
@@ -235,6 +314,7 @@ TestCase {
         verify(!plus.enabled);
     }
     function test_ownedJogStopsOnControllerModeChange() {
+        click("workspace-page-control");
         const plus = control("jogPlus");
         mousePress(plus, plus.width / 2, plus.height / 2);
         backend.update({capabilities: {"jog.start": false}});
@@ -245,6 +325,7 @@ TestCase {
         mouseRelease(plus, plus.width / 2, plus.height / 2);
     }
     function test_jogKeyboardReleaseAndFocusLoss() {
+        click("workspace-page-control");
         const workspace = control("workspace");
         workspace.forceActiveFocus();
         keyPress(Qt.Key_Right);
@@ -256,11 +337,12 @@ TestCase {
         workspace.forceActiveFocus();
         keyPress(Qt.Key_Left);
         const focusStops = backend.stopCount;
-        control("manualTab").forceActiveFocus();
+        control("workspace-page-control").forceActiveFocus();
         tryVerify(() => backend.stopCount > focusStops);
         keyRelease(Qt.Key_Left);
     }
     function test_jogIncrementAndInterruption() {
+        click("workspace-page-control");
         const increment = control("jogIncrement");
         increment.forceActiveFocus();
         keyClick(Qt.Key_Down);
@@ -282,6 +364,7 @@ TestCase {
         mouseRelease(plus, plus.width / 2, plus.height / 2);
     }
     function test_jointJogDoesNotInferAxisMapping() {
+        click("workspace-page-control");
         backend.update({motionMode: "joint", jointCount: 4, joints: [0, 1, 2, 3]});
         waitForRendering(window.contentItem);
         click("joint3");
@@ -303,6 +386,7 @@ TestCase {
         keyRelease(Qt.Key_Left);
     }
     function test_offsetSubmission() {
+        click("workspace-page-control");
         click("axisY");
         click("workTouchOff");
         const dialog = control("dialogHost");
@@ -324,6 +408,7 @@ TestCase {
         verify(!dialog.visible);
     }
     function test_overridesOnlySendUserMoves() {
+        click("workspace-page-control");
         const before = backend.requests.length;
         backend.update({feedOverride: 0.8});
         tryCompare(control("feedOverride"), "value", 80);
@@ -337,11 +422,7 @@ TestCase {
         backend.update({feedOverride: 0.75});
         tryCompare(control("feedOverride"), "value", 75);
     }
-    function test_splitterAndSmallWindowReachability() {
-        const sash = control("programSeparator");
-        const workspace = control("workspace");
-        sash.forceActiveFocus(); keyClick(Qt.Key_Up);
-        compare(workspace.programHeight, 194);
+    function test_smallWindowReachability() {
         window.width = 760; window.height = 640;
         tryCompare(control("manualPanel"), "width", 280);
         waitForRendering(window.contentItem);
@@ -439,6 +520,7 @@ TestCase {
         ];
     }
     function test_jogRejectedWithoutPermittedState(data) {
+        click("workspace-page-control");
         backend.update(data.state);
         const plus = control("jogPlus");
         tryCompare(plus, "enabled", false);
@@ -451,6 +533,7 @@ TestCase {
     }
 
     function test_reconnectDoesNotReplayHeldJog() {
+        click("workspace-page-control");
         const workspace = control("workspace");
         workspace.forceActiveFocus();
         keyPress(Qt.Key_Right);
@@ -497,6 +580,7 @@ TestCase {
         ];
     }
     function test_invalidTouchOffDoesNotSubmit(data) {
+        click("workspace-page-control");
         click("workTouchOff");
         const dialog = control("dialogHost");
         tryCompare(dialog, "opened", true);
@@ -541,10 +625,12 @@ TestCase {
         const manual = control("manualPanel");
         const preview = control("toolpathPanel");
         const program = control("programPanel");
-        verify(manual.x + manual.width < preview.x);
-        compare(control("programSeparator").visible, true);
-        compare(program.x, preview.x);
-        verify(preview.y + preview.height < program.y);
+        verify(!manual.visible);
+        compare(preview.x, 0);
+        compare(preview.width, preview.parent.width);
+        verify(!control("programSeparator").visible);
+        verify(!program.visible);
+        compare(preview.height, preview.parent.height);
         if (data.columns) verify(preview.width >= 520);
         const stop = control("toolbar-program.stop");
         const viewport = control("toolbar-viewport");
@@ -689,6 +775,7 @@ TestCase {
         }
     }
     function test_cameraFocusConsumesJogKeysAndTouch() {
+        click("workspace-page-control");
         const canvas = control("toolpathCanvas"), state = control("toolpathState");
         const before = backend.requests.length;
         mouseClick(canvas, canvas.width / 2, canvas.height / 2);
@@ -707,6 +794,7 @@ TestCase {
         compare(backend.requests.length, before);
     }
     function test_viewToolbarFocusDoesNotOperateMachine() {
+        click("workspace-page-control");
         click("viewport-zoom-in");
         const before = backend.requests.length;
         keyClick(Qt.Key_Right); keyClick(Qt.Key_PageUp);
@@ -715,6 +803,7 @@ TestCase {
         verify(!control("dialogHost").visible);
     }
     function test_touchJogPendingHoldCanceledByFocusLoss() {
+        click("workspace-page-control");
         const plus = control("jogPlus"), before = backend.requests.length;
         let touch = touchEvent(plus);
         touch.press(0, plus, 20, 20).commit(); wait(20);
@@ -724,6 +813,7 @@ TestCase {
         touch.release(0, plus, 20, 20).commit(); wait(20);
     }
     function test_touchJogTapAndSwipeDoNotStartMotion() {
+        click("workspace-page-control");
         const plus = control("jogPlus"), before = backend.requests.length;
         verify(plus.width >= 44 && plus.height >= 44);
         let touch = touchEvent(plus);
@@ -737,6 +827,7 @@ TestCase {
         compare(backend.requests.length, before);
     }
     function test_touchJogHoldReleaseAndDragCancel() {
+        click("workspace-page-control");
         const plus = control("jogPlus"), before = backend.requests.length;
         let touch = touchEvent(plus);
         touch.press(0, plus, 20, 20).commit(); wait(20);
@@ -787,6 +878,7 @@ TestCase {
         compare(backend.requests.length, before);
     }
     function test_settingsStopsJogAndBlocksMachineShortcuts() {
+        click("workspace-page-control");
         control("workspace").forceActiveFocus();
         keyPress(Qt.Key_Right);
         compare(lastRequest().id, "jog.start");

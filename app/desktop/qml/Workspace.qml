@@ -13,6 +13,13 @@ Rectangle {
     objectName: "workspace"
     color: Theme.base
     property string interfaceMode: "professional"
+    property string professionalPage: "preview"
+    onProfessionalPageChanged: { stopJog(); forceActiveFocus(); }
+    function selectProfessionalPage(page) {
+        professionalPage = page;
+        if (page === "advanced") manualPresentation.controlTab = "mdi";
+        else if (page === "control") manualPresentation.controlTab = "manual";
+    }
     property bool settingsOpen: false
     function openSettings() {
         stopJog(); settingsOpen = true; settings.focusBack();
@@ -102,7 +109,9 @@ Rectangle {
         function onControlTabChanged() {
             workspace.stopJog();
             if (workspace.guided) workspace.guidedStage = "device";
-            if (workspace.machine.connected)
+            else workspace.professionalPage = manualPresentation.controlTab === "mdi" ? "advanced" : "control";
+            if (workspace.machine.connected && (!workspace.machine.capabilities
+                    || workspace.machine.capabilities["machine.mode"] !== false))
                 workspace.requestCommand("machine.mode", {mode: manualPresentation.controlTab});
         }
     }
@@ -145,6 +154,7 @@ Rectangle {
         width: panes.width; height: panes.height
         sidebarWidth: workspace.sidebarWidth
         programHeight: workspace.programHeight
+        page: workspace.professionalPage
     }
     GuidedLayout {
         id: guidedLayout
@@ -181,12 +191,60 @@ Rectangle {
         actions: chromeActions
         preview: toolpathPresentation
     }
+    //--------//
+    // BEGIN: ProfessionalPageNavigation
+    Rectangle {
+        id: pageNavigation
+        objectName: "workspaceNavigation"
+        visible: !workspace.guided && !workspace.settingsOpen
+        x: Theme.gap
+        y: chrome.height + Theme.gap
+        width: workspace.compact ? 100 : 116
+        height: parent.height - y - 40
+        color: Theme.sidebar
+        UiDivider { anchors.right: parent.right; width: 1; height: parent.height; vertical: true }
+        Column {
+            x: 8; y: 8
+            width: parent.width - 16
+            spacing: 8
+            Repeater {
+                id: pageButtons
+                model: [
+                    {id: "preview", label: "预览"},
+                    {id: "control", label: "控制"},
+                    {id: "advanced", label: "高级配置"}
+                ]
+                UiButton {
+                    id: pageButton
+                    required property var modelData
+                    required property int index
+                    objectName: "workspace-page-" + modelData.id
+                    width: parent.width; height: 48
+                    kind: "tab"
+                    text: modelData.label
+                    selected: workspace.professionalPage === modelData.id
+                    Accessible.role: Accessible.PageTab
+                    onClicked: workspace.selectProfessionalPage(modelData.id)
+                    function focusPage(offset: int): void {
+                        pageButtons.itemAt((index + offset + pageButtons.count) % pageButtons.count)
+                            .forceActiveFocus(Qt.TabFocusReason);
+                    }
+                    Keys.onUpPressed: focusPage(-1)
+                    Keys.onDownPressed: focusPage(1)
+                    Keys.onLeftPressed: event => event.accepted = true
+                    Keys.onRightPressed: event => event.accepted = true
+                }
+            }
+        }
+    }
+    // END: ProfessionalPageNavigation
+    //--------//
     Item {
         id: panes
         visible: !workspace.settingsOpen
-        x: Theme.gap
+        x: workspace.guided ? Theme.gap : pageNavigation.x + pageNavigation.width + Theme.gap
         y: chrome.height + Theme.gap
-        width: parent.width - Theme.gap * 2
+        width: parent.width - x - Theme.gap
         height: parent.height - y - 40
         ManualPanel {
             id: manualPanel
@@ -194,6 +252,9 @@ Rectangle {
             width: workspace.layout.manualRect.width; height: workspace.layout.manualRect.height
             visible: workspace.layout.manualVisible
             presentation: manualPresentation
+            showModeTabs: workspace.guided
+            showOverrides: workspace.guided || workspace.professionalPage !== "advanced"
+            showActiveCodes: workspace.guided
             machine: workspace.machine
             history: workspace.backend ? workspace.backend.history : []
             onCommandRequested: (actionId, payload) => workspace.requestCommand(actionId, payload)
@@ -331,7 +392,10 @@ Rectangle {
     WorkspaceShortcuts {
         settingsOpen: workspace.settingsOpen
         manualControlsEnabled: manualPanel.visible && !workspace.previewFocused()
-        onManualRequested: if (workspace.guided) workspace.guidedStage = "device"
+        onManualRequested: mode => {
+            if (workspace.guided) workspace.guidedStage = "device";
+            else workspace.selectProfessionalPage(mode === "mdi" ? "advanced" : "control");
+        }
         popupActive: workspace.popupActive
         menuOpen: workspace.menuOpen
         viewShortcutsEnabled: workspace.viewShortcutsEnabled

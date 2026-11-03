@@ -10,6 +10,9 @@ Rectangle {
 
     required property ManualState presentation
     property bool compact: false
+    property bool showModeTabs: true
+    property bool showOverrides: true
+    property bool showActiveCodes: true
     property var machine: ({})
     property var history: []
     readonly property bool connected: !!machine.connected
@@ -97,7 +100,8 @@ Rectangle {
 
             Item {
                 width: parent.width
-                height: 44
+                visible: root.showModeTabs
+                height: visible ? 44 : 0
 
                 Row {
                     id: tabs
@@ -561,6 +565,7 @@ Rectangle {
 
             OverrideControls {
                 width: parent.width
+                visible: root.showOverrides
                 presentation: root.presentation
                 machine: root.machine
                 compact: root.compact
@@ -572,7 +577,7 @@ Rectangle {
                 id: activeCodes
                 width: parent.width
                 height: visible ? 6 + 17 + 8 + codes.height + 12 : 0
-                visible: root.presentation.controlTab === "mdi"
+                visible: root.showActiveCodes && root.presentation.controlTab === "mdi"
 
                 UiText {
                     x: 18
