@@ -10,6 +10,7 @@ import pwd
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path, PurePosixPath
 
@@ -452,17 +453,24 @@ def run(operation, count=None, revision=None):
             "started_at": time.time(),
         }
         atomic_json(PUBLIC / "status.json", result)
-        try:
-            subprocess.run(
-                ["/usr/bin/betterlinuxcnc-updater", "axis-maintenance", str(count)],
-                env=ENV,
-                stdin=subprocess.DEVNULL,
-                check=True,
-            )
-            result["phase"] = "configured"
-        except (OSError, subprocess.SubprocessError) as error:
-            result.update(phase="error", message=str(error))
-            atomic_json(PUBLIC / "status.json", result)
-            raise
+        with tempfile.TemporaryFile(dir=PUBLIC) as errors:
+            try:
+                subprocess.run(
+                    ["/usr/bin/betterlinuxcnc-updater", "axis-maintenance", str(count)],
+                    env=ENV,
+                    stdin=subprocess.DEVNULL,
+                    stderr=errors,
+                    check=True,
+                )
+                result["phase"] = "configured"
+            except (OSError, subprocess.SubprocessError) as error:
+                errors.seek(0, os.SEEK_END)
+                errors.seek(max(0, errors.tell() - 8192))
+                detail = errors.read().decode("utf-8", "replace").strip()
+                result.update(phase="error", message=detail or str(error))
+                atomic_json(PUBLIC / "status.json", result)
+                if detail:
+                    print(detail, file=sys.stderr)
+                raise
         atomic_json(PUBLIC / "status.json", result)
         return result

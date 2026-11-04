@@ -81,6 +81,49 @@ class PolicyTests(unittest.TestCase):
             ):
                 policy.validate_ssh()
 
+    def test_upgrade_recognizes_legacy_pair_preserves_custom_policy_and_is_repeatable(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            self.assertEqual(
+                policy.upgrade_maintenance(root), "unrecognized policy preserved"
+            )
+            policy.install(root)
+            ssh = root / "etc/ssh/sshd_config"
+            sudo = root / "etc/sudoers"
+            current_ssh, current_sudo = ssh.read_text(), sudo.read_text()
+            sudo.chmod(0o600)
+            legacy_ssh = current_ssh.replace("PermitTTY yes", "PermitTTY no")
+            legacy_sudo = "\n".join(
+                line for line in current_sudo.split("\n") if "pa-config" not in line
+            )
+            ssh.write_text(legacy_ssh)
+            sudo.write_text(legacy_sudo + "# onsite customization\n")
+            self.assertEqual(
+                policy.upgrade_maintenance(root), "unrecognized policy preserved"
+            )
+            self.assertEqual(ssh.read_text(), legacy_ssh)
+            sudo.write_text(legacy_sudo)
+            self.assertEqual(policy.upgrade_maintenance(root), "upgraded")
+            self.assertEqual(ssh.read_text(), current_ssh)
+            self.assertEqual(sudo.read_text(), current_sudo)
+            self.assertEqual(policy.upgrade_maintenance(root), "current")
+            backups = list(
+                (root / "var/lib/betterlinuxcnc/recovery").glob(
+                    "*-pa-policy/policies.json"
+                )
+            )
+            self.assertEqual(len(backups), 1)
+            import json
+
+            saved = {
+                item["path"]: item["content"]
+                for item in json.loads(backups[0].read_text())
+            }
+            self.assertEqual(saved["/etc/ssh/sshd_config"], legacy_ssh)
+            self.assertEqual(saved["/etc/sudoers"], legacy_sudo)
+
     def test_fixed_policy_removes_override_sources_and_preserves_original(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

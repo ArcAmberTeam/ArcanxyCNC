@@ -3,6 +3,7 @@
 import datetime
 import json
 import os
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -201,3 +202,85 @@ def restore(previous, root=Path("/")):
             path.unlink(missing_ok=True)
         else:
             write(path, item["content"], item["mode"])
+
+
+# --------#
+# BEGIN: MaintenancePolicyUpgrade
+def upgrade_maintenance(root=Path("/")):
+    """Migrate only the exact activated pre-PA policy; never activate fresh hosts."""
+    names = ("/etc/ssh/sshd_config", "/etc/sudoers")
+    grant = (
+        "Defaults!/usr/lib/betterlinuxcnc/manage-ini/pa-config !use_pty\n"
+        'cnc-maint ALL=(root) NOPASSWD: /usr/lib/betterlinuxcnc/manage-ini/pa-config ""\n'
+    )
+    legacy = {
+        names[0]: POLICIES[names[0]].replace("PermitTTY yes\n", "PermitTTY no\n"),
+        names[1]: POLICIES[names[1]].replace(grant, ""),
+    }
+    previous = []
+    for name in names:
+        path = root / name.lstrip("/")
+        try:
+            for parent in (path, *path.parents):
+                info = parent.lstat()
+                if (
+                    info.st_uid != os.geteuid()
+                    or info.st_mode & 0o022
+                    or stat.S_ISLNK(info.st_mode)
+                ):
+                    return "unrecognized policy preserved"
+                if parent == root:
+                    break
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    return "unrecognized policy preserved"
+                content = stream.read(65537).decode("utf-8")
+        except (OSError, UnicodeError):
+            return "unrecognized policy preserved"
+        if content not in (legacy[name], POLICIES[name]):
+            return "unrecognized policy preserved"
+        previous.append(
+            {"path": name, "content": content, "mode": stat.S_IMODE(info.st_mode)}
+        )
+    if all(item["content"] == POLICIES[item["path"]] for item in previous):
+        return "current"
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    recovery = root / "var/lib/betterlinuxcnc/recovery" / (stamp + "-pa-policy")
+    recovery.mkdir(parents=True, mode=0o700)
+    recovery.parent.chmod(0o700)
+    write(recovery / "policies.json", json.dumps(previous, indent=2) + "\n", 0o600)
+    for directory in (recovery.parent, recovery.parent.parent):
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    try:
+        for item in previous:
+            write(root / item["path"].lstrip("/"), POLICIES[item["path"]], item["mode"])
+        if root == Path("/"):
+            subprocess.run(["/usr/sbin/sshd", "-t"], check=True, capture_output=True)
+            subprocess.run(["/usr/sbin/visudo", "-c"], check=True, capture_output=True)
+            validate_ssh()
+            if Path("/run/systemd/system").is_dir():
+                active = subprocess.run(
+                    ["/usr/bin/systemctl", "is-active", "--quiet", "ssh.service"],
+                    check=False,
+                    capture_output=True,
+                )
+                if active.returncode == 0:
+                    subprocess.run(
+                        ["/usr/bin/systemctl", "reload", "ssh.service"],
+                        check=True,
+                        capture_output=True,
+                    )
+    except Exception:
+        restore(previous, root)
+        raise
+    return "upgraded"
+
+
+# END: MaintenancePolicyUpgrade
+# --------#
