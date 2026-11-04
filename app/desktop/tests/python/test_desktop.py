@@ -545,6 +545,8 @@ else:
             QCoreApplication.sendPostedEvents()
 
     def test_real_qobject_rotary_joint_jog_respects_angular_speed_limits(self):
+        errors = []
+        self.backend.errorOccurred.connect(errors.append)
         self.state.update(
             axes=list("XYZAC"),
             joints=list(range(5)),
@@ -558,7 +560,7 @@ else:
         qml = Path(__file__).resolve().parents[2] / "qml"
         engine = QQmlApplicationEngine()
         engine.addImportPath(str(qml))
-        engine.setInitialProperties({"backend": self.backend})
+        engine.setInitialProperties({"backend": self.backend, "width": 1100, "height": 820})
         engine.load(QUrl.fromLocalFile(str(qml / "Main.qml")))
         try:
             self.assertTrue(engine.rootObjects())
@@ -583,6 +585,7 @@ else:
 
             def click(name):
                 QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point(name))
+                QTest.qWait(50)
 
             def jog_requests():
                 return [
@@ -603,13 +606,15 @@ else:
                     position = point("jogPlus")
                     QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, position)
                     try:
-                        self.wait(lambda before=before: len(jog_requests()) > before)
+                        self.wait(lambda before=before: len(jog_requests()) > before or errors)
+                        self.assertEqual(errors, [])
                         payload = jog_requests()[-1]
                         self.assertEqual(payload["axis"], joint)
                         self.assertEqual(payload["mode"], "joint")
                         self.assertEqual(payload["velocity"], speed)
                     finally:
                         QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, position)
+                        QTest.qWait(50)
             click("joint0")
             self.wait(lambda: item("jogVelocity").property("unit") == "毫米/分钟")
         finally:
