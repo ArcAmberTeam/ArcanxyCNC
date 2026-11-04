@@ -166,7 +166,13 @@ def main():
         payload = {
             "commands": ALLOWED,
             "managementCommands": [" ".join(words) for words in PA_COMMANDS],
-            "buildCommands": ["git clone", "git pull", "build-deb", "build-status", "install-deb FILE"],
+            "buildCommands": [
+                "git clone",
+                "git pull",
+                "build-deb",
+                "build-status",
+                "install-deb FILE",
+            ],
             "buildDirectory": "/var/lib/betterlinuxcnc/build",
             "shell": False,
             "upload": False,

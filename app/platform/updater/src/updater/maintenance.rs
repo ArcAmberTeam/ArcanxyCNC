@@ -103,23 +103,16 @@ pub(super) fn install_local() -> Result<()> {
     let version = prepared.version().to_owned();
     let original = install::preflight(&socket, &manager, uid)?;
     let launcher = PausedLauncher::stop(manager, original)?;
-    let result = (|| -> Result<()> {
-        if install::present(&socket)? || install::present(Path::new("/tmp/linuxcnc.lock"))? {
-            return Err("Control has not stopped; local installation refused".into());
-        }
-        if !super::command("/usr/sbin/betterlinuxcnc-appliance")
-            .arg("backup")
-            .stdin(Stdio::null())
-            .status()?
-            .success()
-        {
-            return Err("Backup failed; local package was not installed".into());
-        }
-        if install::present(&socket)? || install::present(Path::new("/tmp/linuxcnc.lock"))? {
-            return Err("Control returned after backup; local installation refused".into());
-        }
-        prepared.install_after_backup()
-    })();
+    let result = local_write_after_backup(
+        || {
+            if install::present(&socket)? || install::present(Path::new("/tmp/linuxcnc.lock"))? {
+                return Err("Control has not stopped; local installation refused".into());
+            }
+            Ok(())
+        },
+        &mut super::command("/usr/sbin/betterlinuxcnc-appliance"),
+        || prepared.install_after_backup(),
+    );
     if let Err(error) = result {
         launcher.retain_stop_mask();
         return Err(error);
@@ -131,6 +124,23 @@ pub(super) fn install_local() -> Result<()> {
         &version,
         100,
     ))
+}
+fn local_write_after_backup(
+    stopped: impl Fn() -> Result<()>,
+    backup: &mut Command,
+    write: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    stopped()?;
+    if !backup
+        .arg("backup")
+        .stdin(Stdio::null())
+        .status()?
+        .success()
+    {
+        return Err("Backup failed; local package was not installed".into());
+    }
+    stopped()?;
+    write()
 }
 // END: LocalPackageMaintenance
 //--------//
@@ -288,6 +298,51 @@ mod tests {
     use std::cell::Cell;
     use std::os::unix::fs::PermissionsExt;
 
+    #[test]
+    fn local_installation_needs_stopped_checks_and_successful_backup() {
+        for backup_ok in [false, true] {
+            for stopped_ok in [false, true] {
+                let calls = Cell::new(0);
+                let writes = Cell::new(0);
+                let result = local_write_after_backup(
+                    || {
+                        calls.set(calls.get() + 1);
+                        if stopped_ok {
+                            Ok(())
+                        } else {
+                            Err("Control is still running".into())
+                        }
+                    },
+                    &mut Command::new(if backup_ok {
+                        "/usr/bin/true"
+                    } else {
+                        "/usr/bin/false"
+                    }),
+                    || {
+                        writes.set(writes.get() + 1);
+                        Ok(())
+                    },
+                );
+                assert_eq!(result.is_ok(), stopped_ok && backup_ok);
+                assert_eq!(writes.get(), usize::from(stopped_ok && backup_ok));
+                assert_eq!(calls.get(), if stopped_ok && backup_ok { 2 } else { 1 });
+            }
+        }
+        let calls = Cell::new(0);
+        assert!(local_write_after_backup(
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() == 1 {
+                    Ok(())
+                } else {
+                    Err("Control returned".into())
+                }
+            },
+            &mut Command::new("/usr/bin/true"),
+            || panic!("writer must not run after control returns"),
+        )
+        .is_err());
+    }
     #[test]
     fn every_hardware_step_requires_a_live_stopped_guard() {
         for denied_step in [None, Some(0), Some(1), Some(2), Some(3)] {

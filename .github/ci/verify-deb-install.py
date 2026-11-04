@@ -427,8 +427,8 @@ def verify_maintenance_workspace(package, source, version):
     # The checkout is a CI fixture; production Git remains HTTPS-only.
     import shutil
     checkout = workspace / "src/ArcanxyCNC"
-    shutil.copytree(source, checkout, ignore=shutil.ignore_patterns(".git", "__pycache__", "target"))
-    run("chown", "-R", "cnc-maint:cnc-maint", str(checkout))
+    shutil.copytree(source, checkout, symlinks=True, ignore=shutil.ignore_patterns(".git", "__pycache__", "target"))
+    run("chown", "-hR", "cnc-maint:cnc-maint", str(checkout))
     run("runuser", "-u", "cnc-maint", "--", helper, "workspace", "build-deb", timeout=1500)
     built = list((workspace / "packages").glob("*.deb"))
     require(len(built) == 1, "Local build did not produce one package")
