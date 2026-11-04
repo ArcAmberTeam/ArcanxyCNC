@@ -59,8 +59,10 @@ fn install(name: &str) -> Result<()> {
     if peer(&stream)? != 0 {
         return Err("Local package service is not root".into());
     }
-    io::copy(&mut file.take(MAX_PACKAGE + 1), &mut stream)?;
-    stream.shutdown(std::net::Shutdown::Write)?;
+    let uploaded = io::copy(&mut file.take(MAX_PACKAGE + 1), &mut stream);
+    // The guard can reject before consuming the upload. Read its reason even if
+    // that closes our write half, rather than reporting only a broken pipe.
+    let _ = stream.shutdown(std::net::Shutdown::Write);
     let mut reader = std::io::BufReader::new(stream);
     let mut complete = false;
     use std::io::BufRead;
@@ -79,8 +81,11 @@ fn install(name: &str) -> Result<()> {
         io::stdout().flush()?;
     }
     if !complete {
-        return Err("Local package installation did not complete".into());
+        return Err(
+            "Local package installation did not complete; see the service response above".into(),
+        );
     }
+    uploaded?;
     Ok(())
 }
 

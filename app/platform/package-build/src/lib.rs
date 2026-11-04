@@ -121,6 +121,30 @@ fn package_file(name: &str) -> Result<File> {
 }
 fn build() -> Result<()> {
     let source = checkout()?;
+    let installed = process("/usr/bin/dpkg-query")
+        .args(["-W", "-f=${Version}", "betterlinuxcnc-qt"])
+        .stdout(Stdio::piped())
+        .output()?;
+    if !installed.status.success() {
+        return Err("Application is not installed".into());
+    }
+    let base_version = String::from_utf8(installed.stdout)?.trim().to_owned();
+    // Initialize each pinned toolchain serially before CMake starts concurrent Cargo processes.
+    for module in [
+        "cam-link",
+        "updater",
+        "mesa-update",
+        "manage-ini",
+        "account-management/cnc-maint",
+        "package-build",
+        "local-update",
+    ] {
+        execute(
+            process("/usr/bin/cargo")
+                .arg("--version")
+                .current_dir(source.join("app/platform").join(module)),
+        )?;
+    }
     // Local application rebuilds retain the installed, already commissioned HOMEMOD.
     execute(process("/usr/bin/python3").args(["-I", "-S", "-c", r#"
 import hashlib, json, pathlib, subprocess
@@ -139,6 +163,7 @@ assert record['application_version'] == version, 'Installed homing provenance ve
             .arg(&source)
             .arg("-B")
             .arg(&work)
+            .arg(format!("-DBETTERCNC_LOCAL_PACKAGE_VERSION={base_version}"))
             .args([
                 "-DCMAKE_BUILD_TYPE=Release",
                 "-DBUILD_TESTING=OFF",

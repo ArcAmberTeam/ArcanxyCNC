@@ -210,10 +210,19 @@ impl PreparedLocalPackage {
         log.write_all(&output.stdout)?;
         log.write_all(&output.stderr)?;
         if !output.status.success() || installed_version()? != self.version {
-            return Err(
-                "Local installation failed; control remains stopped; inspect local-install.log"
-                    .into(),
-            );
+            let detail: String = String::from_utf8_lossy(&output.stderr)
+                .chars()
+                .rev()
+                .take(2000)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            return Err(format!(
+                "Local installation failed; control remains stopped: {}",
+                detail.trim()
+            )
+            .into());
         }
         let parent = Path::new(ORIGIN).parent().ok_or("Missing origin parent")?;
         trusted_directory(parent)?;

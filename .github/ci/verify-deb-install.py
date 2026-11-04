@@ -429,7 +429,12 @@ def verify_maintenance_workspace(package, source, version):
     checkout = workspace / "src/ArcanxyCNC"
     shutil.copytree(source, checkout, symlinks=True, ignore=shutil.ignore_patterns(".git", "__pycache__", "target"))
     run("chown", "-hR", "cnc-maint:cnc-maint", str(checkout))
-    run("runuser", "-u", "cnc-maint", "--", helper, "workspace", "build-deb", timeout=1500)
+    # A newer source version must not silently change the installed base version.
+    cmake = checkout / "CMakeLists.txt"
+    cmake.write_text(cmake.read_text().replace("VERSION " + version, "VERSION 99.1.1.1", 1))
+    metadata = checkout / "app/desktop/python/bettercnc/__init__.py"
+    metadata.write_text(metadata.read_text().replace(version, "99.1.1.1"))
+    subprocess.run(["runuser", "-u", "cnc-maint", "--", helper, "workspace", "build-deb"], check=True, timeout=1500)
     built = list((workspace / "packages").glob("*.deb"))
     require(len(built) == 1, "Local build did not produce one package")
     require(run("dpkg-deb", "-f", str(built[0]), "Version").stdout.strip() == version, "Local build changed the Debian version")
@@ -438,6 +443,8 @@ def verify_maintenance_workspace(package, source, version):
         with tempfile.TemporaryDirectory() as temporary:
             run("dpkg-deb", "-x", str(built[0]), temporary)
             require((Path(temporary) / path).read_bytes() == (Path("/") / path).read_bytes(), "Local build replaced the commissioned homing payload")
+            metadata = Path(temporary) / "usr/lib/betterlinuxcnc/python/bettercnc/__init__.py"
+            require('__version__ = "' + version + '"' in metadata.read_text(), "Local desktop version differs from its DEB")
     # Exercise origin presentation with a real root-owned record, no machine operation.
     origin = Path("/var/lib/betterlinuxcnc/build-origin.json")
     origin.write_text(json.dumps({"schema_version": 1, "version": version, "sha256": hashlib.sha256(built[0].read_bytes()).hexdigest()}))
