@@ -17,6 +17,7 @@ class MaintenanceAccount(QObject):
             "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account"
         ]
         self._available = sys.platform == "linux" or command is not None
+        self._closed = False
         self._enabled = False
         self._known = False
         self._busy = False
@@ -42,7 +43,7 @@ class MaintenanceAccount(QObject):
     message = Property(str, lambda self: self._message, notify=changed)
 
     def _request(self, operation, password=""):
-        if not self._available or self._busy:
+        if self._closed or not self._available or self._busy:
             return False
         self._busy = True
         self._message = "正在读取…" if operation == "status" else "正在保存…"
@@ -100,6 +101,7 @@ class MaintenanceAccount(QObject):
             self.changed.emit()
 
     def close(self):
+        self._closed = True
         self._timer.stop()
         self._deadline.stop()
         self._process.kill()

@@ -270,6 +270,11 @@ jobs:
           cargo check --locked --all-targets
           cargo clippy --locked --all-targets -- -D warnings
           SERVICE_TEST_PYTHON=python3 cargo test --locked
+      - name: Verify the actual maintenance account systemd service
+        if: matrix.module == 'app/platform/account-management/cnc-maint'
+        run: |
+          cargo build --locked
+          sudo env GITHUB_ACTIONS=true python3 "$GITHUB_WORKSPACE/.github/ci/account-service-check.py" "$PWD/target/debug/cnc-maint-account"
       - name: Verify PA terminal input through a real pseudoterminal
         if: matrix.module == 'app/platform/manage-ini'
         run: |
