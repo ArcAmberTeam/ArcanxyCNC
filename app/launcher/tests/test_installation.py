@@ -14,8 +14,12 @@ from pathlib import Path
 
 
 class InstallationTests(unittest.TestCase):
-    def test_installed_launcher_has_no_runtime_dependencies(self):
-        self.assertFalse(importlib.metadata.requires("betterlinuxcnc-launcher"))
+    def test_installed_launcher_uses_only_the_stdlib_diagnostic_client(self):
+        self.assertEqual(
+            importlib.metadata.requires("betterlinuxcnc-launcher"),
+            ["betterlinuxcnc-error-records==0.1.0"],
+        )
+        self.assertFalse(importlib.metadata.requires("betterlinuxcnc-error-records"))
 
     def test_standalone_desktop_installs_only_its_own_application(self):
         source = Path(__file__).resolve().parents[3] / "app/desktop"
