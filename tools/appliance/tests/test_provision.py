@@ -36,6 +36,12 @@ memberships = options.get('memberships', {})
 owners = {}
 real_open, real_fstat = os.open, os.fstat
 real_is_dir = Path.is_dir
+real_lstat = Path.lstat
+def policy_lstat(path, *args, **kwargs):
+    if str(path) in ('/etc/ssh/sshd_config', '/etc/sudoers', '/etc/ssh', '/etc'):
+        path = root / str(path).lstrip('/')
+    return real_lstat(path, *args, **kwargs)
+Path.lstat = policy_lstat
 for relative, owner in options.get('owners', {}).items():
     info = (root / relative).stat()
     owners[(info.st_dev, info.st_ino)] = owner
