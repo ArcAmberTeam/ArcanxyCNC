@@ -99,6 +99,11 @@ impl Store {
     }
 
     pub(crate) fn lock(&self) -> Result<File> {
+        self.try_lock()?
+            .ok_or_else(|| "Another Mesa update operation is already running".into())
+    }
+
+    pub(crate) fn try_lock(&self) -> Result<Option<File>> {
         let name = CString::new("operation.lock")?;
         let fd = unsafe {
             libc::openat(
@@ -118,9 +123,13 @@ impl Store {
         let file = unsafe { File::from_raw_fd(fd) };
         self.validate_file(&file, false)?;
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            return Err("Another Mesa update operation is already running".into());
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::WouldBlock {
+                return Ok(None);
+            }
+            return Err(error.into());
         }
-        Ok(file)
+        Ok(Some(file))
     }
 
     pub(crate) fn read_status(&self) -> Result<Option<Vec<u8>>> {
@@ -265,8 +274,11 @@ mod tests {
     fn locking_and_file_boundaries_fail_closed() {
         let root = tempfile::tempdir().unwrap();
         let store = temporary(root.path());
-        let _lock = store.lock().unwrap();
+        let lock = store.lock().unwrap();
         assert!(store.lock().is_err());
+        assert!(store.try_lock().unwrap().is_none());
+        drop(lock);
+        assert!(store.try_lock().unwrap().is_some());
         assert!(store.write("../outside", b"bad").is_err());
         symlink("missing", root.path().join("status.json")).unwrap();
         assert!(store.read_status().is_err());

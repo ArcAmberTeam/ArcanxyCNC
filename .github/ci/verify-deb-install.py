@@ -464,6 +464,39 @@ def verify_maintenance_workspace(package, source, version):
     print("Installed maintenance CLI built a same-version DEB as cnc-maint; archive, retained HOMEMOD, origin and preflight refusal verified")
 
 
+def verify_interrupted_mesa_check():
+    # Exercise the installed public CLI without network or hardware requests.
+    script = r'''
+import fcntl, json, os, pathlib, subprocess
+cache = pathlib.Path('/var/cache/betterlinuxcnc/user/mesa-update')
+cache.mkdir(mode=0o700, exist_ok=True)
+record = cache / 'status.json'
+assert not record.exists(), 'Unexpected Mesa fixture state'
+status = dict(schema_version=1, component='mesa-update', phase='checking',
+             message='Interrupted fixture', updated_unix=1, host_boot_id=None,
+             installed_app_version=None, available_version=None,
+             app_latest_version=None, mesa_latest_version=None, manifest=None,
+             firmware_downloaded=False, flash_enabled=False)
+record.write_text(json.dumps(status))
+record.chmod(0o600)
+def read():
+    return json.loads(subprocess.check_output(
+        ['/usr/bin/betterlinuxcnc-mesa-update', 'status'], text=True, timeout=10))
+try:
+    with (cache / 'operation.lock').open('w') as lock:
+        os.fchmod(lock.fileno(), 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert read()['phase'] == 'checking'
+    observed = read()
+    assert observed['phase'] == 'error'
+    assert observed['updated_unix'] == 1
+    assert json.loads(record.read_text()) == status
+finally:
+    record.unlink()
+'''
+    run("runuser", "-u", "linuxcnc", "--", "python3", "-I", "-c", script)
+
+
 def main():
     require(os.environ.get("GITHUB_ACTIONS") == "true" and os.geteuid() == 0, "GitHub CI container required")
     package, source = map(Path, sys.argv[1:])
@@ -514,6 +547,7 @@ def main():
     installed_version = run("/usr/bin/python3", "-c", "import sys; sys.path.insert(0, '/usr/lib/betterlinuxcnc/python'); from bettercnc import __version__; print(__version__)").stdout.strip()
     require(installed_version == version, "Installed application version mismatch")
     verify_installed_homing(source, version)
+    verify_interrupted_mesa_check()
     run("/usr/bin/python3", str(source / ".github/ci/check-error-records.py"), str(source))
     verify_maintenance_workspace(package, source, version)
 
