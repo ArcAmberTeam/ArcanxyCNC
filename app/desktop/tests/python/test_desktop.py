@@ -14,6 +14,7 @@ from bettercnc.desktop import DesktopBackend
 from PySide6.QtCore import QCoreApplication, QObject, QPointF, QSettings, Qt, QUrl
 from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 from test_session import Peer
 
@@ -565,7 +566,7 @@ else:
             self.assertTrue(QTest.qWaitForWindowExposed(window))
 
             def item(name):
-                pending = [window.contentItem()]
+                pending: list[QQuickItem] = [window.contentItem()]
                 while pending:
                     control = pending.pop()
                     if control.objectName() == name:
