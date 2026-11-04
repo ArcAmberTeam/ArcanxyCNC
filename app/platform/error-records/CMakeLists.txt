@@ -12,5 +12,8 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/runtime/ready"
     DEPENDS runtime/prepare.py runtime/mysql.json VERBATIM)
 add_custom_target(betterlinuxcnc-error-records-binary ALL DEPENDS "${module_binary}" "${CMAKE_CURRENT_BINARY_DIR}/runtime/ready")
 install(PROGRAMS "${module_binary}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/error-records")
-install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/runtime/mysql" DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/error-records")
+install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/runtime/mysql"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/error-records"
+    USE_SOURCE_PERMISSIONS
+    DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 install(FILES packaging/betterlinuxcnc-error-records.service DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/error-records")

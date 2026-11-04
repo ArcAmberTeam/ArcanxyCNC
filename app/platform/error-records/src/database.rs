@@ -32,7 +32,7 @@ fn server() -> Command {
         &format!("--basedir={base}"),
         &format!("--datadir={DATA}"),
         &format!("--plugin-dir={base}/lib/mysql/plugin"),
-        &format!("--lc-messages-dir={base}/share/mysql"),
+        &format!("--lc-messages-dir={base}/share/mysql-8.4"),
         "--skip-networking",
         "--mysqlx=OFF",
         "--skip-log-bin",

@@ -32,8 +32,12 @@ with subprocess.Popen(
             name = member.name.removeprefix("./")
             keep = (
                 name == "usr/sbin/mysqld"
-                or name.startswith(("usr/lib/mysql/", "usr/share/mysql/"))
-                or name == "usr/share/doc/mysql-community-server-core/copyright"
+                or name.startswith(("usr/lib/mysql/", "usr/share/mysql-8.4/"))
+                or name
+                in (
+                    "usr/share/doc/mysql-community-server-core/copyright",
+                    "usr/share/doc/mysql-community-server-core/LICENSE.gz",
+                )
             )
             if not keep or not member.isfile():
                 continue
@@ -49,4 +53,11 @@ with subprocess.Popen(
             target.chmod(0o755 if member.mode & 0o111 else 0o644)
     if process.wait() != 0:
         raise ValueError("Cannot read MySQL runtime package")
+for required in (
+    "usr/sbin/mysqld",
+    "usr/share/mysql-8.4/english/errmsg.sys",
+    "usr/share/doc/mysql-community-server-core/LICENSE.gz",
+):
+    if not (root / "mysql" / required).is_file():
+        raise ValueError("Incomplete pinned MySQL runtime")
 (root / "ready").write_text(record["sha256"] + "\n")

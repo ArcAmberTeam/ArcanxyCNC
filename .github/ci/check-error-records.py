@@ -76,6 +76,16 @@ def main():
     RUNTIME.mkdir(exist_ok=True)
     os.chown(RUNTIME, account.pw_uid, group)
     RUNTIME.chmod(0o755)
+    run(
+        "runuser",
+        "-u",
+        "cnc-errors",
+        "--",
+        "test",
+        "-x",
+        str(BASE / "mysql/usr/sbin/mysqld"),
+    )
+    assert (BASE / "mysql/usr/share/mysql-8.4/english/errmsg.sys").is_file()
     with tempfile.TemporaryFile(mode="w+") as output:
         service = subprocess.Popen(
             [
