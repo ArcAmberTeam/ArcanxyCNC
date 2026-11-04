@@ -47,6 +47,31 @@ TestCase {
         click("settings-back");
     }
     function lastRequest() { return backend.requests[backend.requests.length - 1]; }
+    function test_developerAccountRequiresConfirmationAndActualState() {
+        click("open-settings");
+        click("settings-tab-developer");
+        click("maintenance-account-enable");
+        control("maintenance-account-password").text = "test password 123";
+        control("maintenance-account-confirmation").text = "different";
+        click("maintenance-account-save");
+        compare(backend.maintenanceAccount.saves, 0);
+        verify(control("maintenance-account-validation").visible);
+        control("maintenance-account-confirmation").text = "test password 123";
+        click("maintenance-account-save");
+        compare(backend.maintenanceAccount.saves, 1);
+        compare(control("maintenance-account-password").text, "");
+        verify(!control("maintenance-account-disable").enabled);
+        backend.maintenanceAccount.enabled = true;
+        click("maintenance-account-enable");
+        control("maintenance-account-password").text = "do not retain";
+        click("settings-back");
+        compare(control("maintenance-account-password").text, "");
+        click("open-settings");
+        click("settings-tab-developer");
+        click("maintenance-account-disable");
+        compare(backend.maintenanceAccount.disables, 1);
+        verify(backend.maintenanceAccount.enabled);
+    }
     function test_selectingAxesAutomaticallyWritesThroughMaintenance() {
         backend.update({powered: false});
         click("open-settings");

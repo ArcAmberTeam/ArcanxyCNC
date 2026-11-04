@@ -2,6 +2,18 @@ import QtQml
 
 // Explicit test fixture: records requested actions without operating a controller.
 QtObject {
+    property QtObject maintenanceAccount: QtObject {
+        property bool available: true
+        property bool enabled: false
+        property bool known: true
+        property bool busy: false
+        property string message: "维护登录已关闭"
+        property int saves: 0
+        property int disables: 0
+        function refresh() {}
+        function setPassword(value) { saves++; return true; }
+        function disable() { disables++; return true; }
+    }
     property QtObject axisProfiles: QtObject {
         property bool available: true
         property bool busy: false

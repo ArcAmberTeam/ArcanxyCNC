@@ -136,6 +136,11 @@ def main():
     if args.action == "provision":
         _accounts.provision()
         axis_profiles.install_integration()
+        account_manager = Path(
+            "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account"
+        )
+        if account_manager.is_file():
+            _accounts.run(str(account_manager), "provision")
         print("Machine axis migration: " + _axis_upgrade.upgrade())
         if Path("/run/systemd/system").is_dir():
             _accounts.run("/usr/bin/systemctl", "daemon-reload")

@@ -10,6 +10,8 @@ import os
 import pwd
 import re
 import secrets
+import socket
+import threading
 import stat
 import subprocess
 import sys
@@ -96,6 +98,67 @@ def password_digest():
     # Compare without exposing either a credential or its digest in CI output.
     value = next(line for line in Path("/etc/shadow").read_bytes().splitlines() if line.startswith(b"cnc-maint:"))
     return hashlib.sha256(value).digest()
+
+
+def verify_maintenance_account():
+    """Exercise installed Rust with actual account tools and authenticated sockets."""
+    helper = "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account"
+    ledger = Path("/var/lib/betterlinuxcnc/cnc-maint-policy-v1")
+    ownership(helper, "root", "root", 0o755, directory=False)
+    require(json.loads(run(helper, "status").stdout)["enabled"] is False, "New maintenance account is enabled")
+    # Reproduce a pre-migration installation with a real existing password.
+    run("/usr/sbin/betterlinuxcnc-appliance", "set-maintenance-password", input=secrets.token_urlsafe(32))
+    ledger.unlink()
+    run(helper, "provision")
+    fields = next(line.split(":") for line in Path("/etc/shadow").read_text().splitlines() if line.startswith("cnc-maint:"))
+    require(fields[1] == "!" and fields[7] == "1", "Migration retained an unlockable old password")
+    listener = socket.socket(socket.AF_UNIX)
+    endpoint = Path("/run/betterlinuxcnc-cnc-maint.sock")
+    listener.bind(str(endpoint))
+    listener.listen(1)
+    listener.settimeout(15)
+    operator = pwd.getpwnam("linuxcnc")
+    os.chown(endpoint, operator.pw_uid, operator.pw_gid)
+    endpoint.chmod(0o600)
+    def request(operation, password="", success=True):
+        failures = []
+        def serve():
+            try:
+                connection, _ = listener.accept()
+                with connection:
+                    result = subprocess.run([helper, "serve"], stdin=connection,
+                                            capture_output=True, timeout=15)
+                    require(result.returncode == 0, "Account server failed")
+            except BaseException as error:
+                failures.append(error)
+        worker = threading.Thread(target=serve)
+        worker.start()
+        result = subprocess.run(["/usr/sbin/runuser", "-u", "linuxcnc", "--", helper, "request", operation],
+                                input=password, capture_output=True, text=True, timeout=20)
+        worker.join(20)
+        require(not worker.is_alive() and not failures, "Account socket exchange failed")
+        require((result.returncode == 0) == success, "Unexpected account client outcome")
+        require(not password or password not in result.stdout + result.stderr, "Credential leaked in output")
+        return json.loads(result.stdout) if success else None
+    try:
+        require(request("status")["enabled"] is False, "Disabled account status lost")
+        require(request("enable", secrets.token_urlsafe(32))["enabled"] is True, "Enabling failed")
+        before = password_digest()
+        require(request("enable", secrets.token_urlsafe(32))["enabled"] is True, "Changing password failed")
+        require(password_digest() != before, "Password did not change")
+        before = password_digest()
+        run(helper, "provision")
+        require(password_digest() == before, "Repeat provisioning revoked the new password")
+        require(request("disable")["enabled"] is False, "Disabling failed")
+        fields = next(line.split(":") for line in Path("/etc/shadow").read_text().splitlines() if line.startswith("cnc-maint:"))
+        require(fields[1] == "!" and fields[7] == "1", "Disable kept credentials or account validity")
+        for account in ("cnc-maint", "nobody"):
+            result = subprocess.run(["/usr/sbin/runuser", "-u", account, "--", helper, "request", "status"],
+                                    capture_output=True, timeout=10)
+            require(result.returncode != 0, "Unauthorized account reached account management")
+    finally:
+        listener.close()
+        endpoint.unlink(missing_ok=True)
 
 
 def verify_xsession_entry():
@@ -383,6 +446,7 @@ def main():
     )
     require(Path("/usr/bin/mesaflash").read_bytes().startswith(b"\x7fELF"), "Missing real mesaflash dependency")
     identities = accounts_and_paths()
+    verify_maintenance_account()
     require(not Path("/etc/betterlinuxcnc/launcher.json").exists(), "Package imported a machine configuration")
     require(not Path("/etc/lightdm/lightdm.conf.d/90-betterlinuxcnc.conf").exists(), "Package activated display policy")
     require("ForceCommand /usr/bin/python3 -I /usr/lib/betterlinuxcnc" not in Path("/etc/ssh/sshd_config").read_text(), "Package activated SSH policy")

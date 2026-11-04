@@ -15,6 +15,7 @@ Rectangle {
     property var mesaUpdate: null
     property var mesaFlash: null
     property var axisProfiles: null
+    property var maintenanceAccount: null
     property string interfaceMode: "professional"
     property string section: "about"
     signal backRequested()
@@ -57,7 +58,8 @@ Rectangle {
         {id: "about", text: "关于本机"},
         {id: "interface", text: "界面与显示"},
         {id: "display", text: "刀路与视图"},
-        {id: "machine", text: "加工设置"}
+        {id: "machine", text: "加工设置"},
+        {id: "developer", text: "开发者选项"}
     ]
     readonly property string sectionTitle: sections.find(item => item.id === section)?.text || "设置"
     Rectangle {
@@ -146,6 +148,11 @@ Rectangle {
                 width: parent.width
                 visible: root.section === "display"
                 presentation: root.preview
+            }
+            SettingsDeveloper {
+                width: parent.width
+                visible: root.section === "developer"
+                account: root.maintenanceAccount
             }
             SettingsMachining {
                 width: parent.width

@@ -208,6 +208,9 @@ def prepare():
 
 
 def password(value):
-    if not value or any(char in value for char in "\r\n\x00:") or len(value) > 256:
-        raise ValueError("Invalid maintenance password input")
-    run("/usr/sbin/chpasswd", input=f"{MAINTENANCE}:{value}\n")
+    # Compatibility entry only; Rust owns validation and all password mutations.
+    run(
+        "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account",
+        "enable",
+        input=value,
+    )
