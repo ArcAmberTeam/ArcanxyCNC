@@ -453,7 +453,7 @@ def run(operation, count=None, revision=None):
             "started_at": time.time(),
         }
         atomic_json(PUBLIC / "status.json", result)
-        with tempfile.TemporaryFile() as errors:
+        with tempfile.TemporaryFile(dir=PUBLIC) as errors:
             try:
                 subprocess.run(
                     ["/usr/bin/betterlinuxcnc-updater", "axis-maintenance", str(count)],
