@@ -1,6 +1,8 @@
 """Installed MySQL and error-client acceptance in an isolated CI container only."""
 
 import json
+import ctypes
+import errno
 import os
 import pwd
 import signal
@@ -15,6 +17,50 @@ BINARY = BASE / "betterlinuxcnc-error-records"
 STATE = Path("/var/lib/betterlinuxcnc/error-records")
 RUNTIME = Path("/run/betterlinuxcnc-error-records")
 EXPORT = Path("/var/log/betterlinuxcnc/errors")
+
+
+def restrict_special_mode_bits():
+    """Apply the updater's chmod SGID/SUID restriction to the child only."""
+    class Argument(ctypes.Structure):
+        _fields_ = [
+            ("arg", ctypes.c_uint),
+            ("op", ctypes.c_int),
+            ("mask", ctypes.c_uint64),
+            ("value", ctypes.c_uint64),
+        ]
+
+    library = ctypes.CDLL("libseccomp.so.2")
+    library.seccomp_init.argtypes = [ctypes.c_uint32]
+    library.seccomp_init.restype = ctypes.c_void_p
+    library.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
+    library.seccomp_rule_add_array.argtypes = [
+        ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint,
+        ctypes.POINTER(Argument),
+    ]
+    library.seccomp_load.argtypes = [ctypes.c_void_p]
+    library.seccomp_release.argtypes = [ctypes.c_void_p]
+    context = library.seccomp_init(0x7FFF0000)
+    if not context:
+        raise RuntimeError("Cannot initialize the installation sandbox")
+    try:
+        for name, argument in ((b"chmod", 1), (b"fchmod", 1), (b"fchmodat", 2), (b"fchmodat2", 2)):
+            syscall = library.seccomp_syscall_resolve_name(name)
+            if syscall < 0:
+                if name == b"fchmodat2":
+                    continue
+                raise RuntimeError("Missing chmod syscall")
+            for bit in (0o2000, 0o4000):
+                comparison = Argument(argument, 7, bit, bit)
+                result = library.seccomp_rule_add_array(
+                    context, 0x00050000 | errno.EPERM, syscall, 1,
+                    ctypes.byref(comparison),
+                )
+                if result != 0:
+                    raise RuntimeError("Cannot install chmod restriction")
+        if library.seccomp_load(context) != 0:
+            raise RuntimeError("Cannot activate the installation sandbox")
+    finally:
+        library.seccomp_release(context)
 
 
 def run(*args, **kwargs):
@@ -73,6 +119,16 @@ def main():
 
     account = pwd.getpwnam("cnc-errors")
     group = grp.getgrnam("cnc-logs").gr_gid
+    # Real installed provisioning must work under the update service's filter.
+    # Verify the restriction itself, so an ineffective fixture cannot pass.
+    with tempfile.TemporaryDirectory() as scratch:
+        denied = subprocess.run(
+            ["chmod", "2750", scratch], capture_output=True,
+            preexec_fn=restrict_special_mode_bits,
+        )
+        assert denied.returncode != 0, "SGID restriction was not applied"
+    run(str(BINARY), "provision", preexec_fn=restrict_special_mode_bits)
+    assert EXPORT.stat().st_mode & 0o7777 == 0o750
     RUNTIME.mkdir(exist_ok=True)
     os.chown(RUNTIME, account.pw_uid, group)
     RUNTIME.chmod(0o755)
@@ -128,6 +184,7 @@ def main():
             assert query()["server_version"].startswith("8.4.")
             exported = list(EXPORT.glob("parameters/*/events-*.jsonl"))
             assert any(record["event_id"] in path.read_text() for path in exported)
+            run("runuser", "-u", "cnc-maint", "--", "test", "-r", str(exported[0]))
 
             # Exercise the installed public Controller against a test-only vendor seam.
             script = """

@@ -151,7 +151,15 @@ fn request_command() -> std::process::Command {
 }
 
 fn show_status(store: Option<Store>, component: &str) -> Result<()> {
+    // Hold the operation lock through the read and response when it is free.
+    // A new check cannot race a stale record into an apparent active operation.
+    let observation_lock = if component == "mesa-update" {
+        store.as_ref().map(Store::try_lock).transpose()?.flatten()
+    } else {
+        None
+    };
     let mut status = match store
+        .as_ref()
         .map(|store| store.read_status())
         .transpose()?
         .flatten()
@@ -165,6 +173,7 @@ fn show_status(store: Option<Store>, component: &str) -> Result<()> {
         }
         None => Status::new(component, "not_checked", "No Mesa operation has completed"),
     };
+    observe_interrupted_check(&mut status, observation_lock.is_some());
     if component == "mesa-flash"
         && matches!(
             status.phase.as_str(),
@@ -182,6 +191,14 @@ fn show_status(store: Option<Store>, component: &str) -> Result<()> {
         status.observe_host_boot(platform::host_boot_id().ok().as_deref());
     }
     print_status(&status)
+}
+
+fn observe_interrupted_check(status: &mut Status, lock_acquired: bool) {
+    if status.component == "mesa-update" && status.phase == "checking" && lock_acquired {
+        status.phase = "error".into();
+        status.message = "The previous Mesa check was interrupted; run Check again".into();
+        status.flash_enabled = false;
+    }
 }
 
 pub(crate) fn check() -> Result<()> {
@@ -410,6 +427,21 @@ mod tests {
 
     const WRITING_BOOT: &str = "c6076b8e-a07e-4c6d-93a1-0b1f99551b63";
     const LATER_BOOT: &str = "83900f86-d894-4e74-9cc4-23167314e1e9";
+
+    #[test]
+    fn interrupted_check_is_distinct_from_an_active_check_or_flash() {
+        let mut status = Status::new("mesa-update", "checking", "pending");
+        let timestamp = status.updated_unix;
+        observe_interrupted_check(&mut status, false);
+        assert_eq!(status.phase, "checking");
+        observe_interrupted_check(&mut status, true);
+        assert_eq!(status.phase, "error");
+        assert_eq!(status.updated_unix, timestamp);
+        assert!(!status.flash_enabled);
+        let mut flash = Status::new("mesa-flash", "checking", "pending");
+        observe_interrupted_check(&mut flash, true);
+        assert_eq!(flash.phase, "checking");
+    }
 
     #[test]
     fn host_restart_derives_an_unconfirmed_view_without_changing_operation_evidence() {

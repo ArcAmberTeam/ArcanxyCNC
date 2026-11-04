@@ -92,9 +92,11 @@ pub(crate) fn run() -> Result<()> {
         .parse::<u32>()?;
     directory(Path::new(STATE), owner, group, 0o700)?;
     directory(&Path::new(STATE).join("pending"), owner, group, 0o700)?;
-    directory(Path::new(EXPORT), owner, group, 0o2750)?;
+    // The service already runs with cnc-logs as its primary group. SGID is
+    // unnecessary and is rejected by the updater's RestrictSUIDSGID sandbox.
+    directory(Path::new(EXPORT), owner, group, 0o750)?;
     for category in crate::categories::ALL {
-        directory(&Path::new(EXPORT).join(category), owner, group, 0o2750)?;
+        directory(&Path::new(EXPORT).join(category), owner, group, 0o750)?;
     }
     if !Path::new("/var/lib/mysql").exists() {
         directory(Path::new("/var/lib/mysql"), 0, 0, 0o755)?;
