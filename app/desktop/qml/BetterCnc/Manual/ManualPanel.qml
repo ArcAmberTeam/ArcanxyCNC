@@ -5,6 +5,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import BetterCnc.Ui 1.0
 
+//--------//
+// BEGIN: ManualOperationPanel
 Rectangle {
     id: root
 
@@ -27,6 +29,26 @@ Rectangle {
     readonly property var axes: axesKey ? axesKey.split(",") : []
     readonly property var joints: jointsKey ? jointsKey.split(",").map(Number) : []
     readonly property var selectionValues: presentation.mode === "joint" ? joints : axes
+    readonly property string jogAxis: {
+        if (presentation.mode !== "joint") return presentation.selectedAxis;
+        const mapping = machine.jointMap || {};
+        const matches = Object.keys(mapping).filter(axis => Array.isArray(mapping[axis])
+            && mapping[axis].length === 1 && mapping[axis][0] === presentation.selectedJoint);
+        return matches.length === 1 ? matches[0] : "";
+    }
+    readonly property bool rotaryJog: ["A", "B", "C"].indexOf(jogAxis) >= 0
+    readonly property real jogSpeedLimit: {
+        const limits = (machine.axisLimits || {})[jogAxis] || {};
+        const axisMaximum = Number(limits.maxVelocity || 0);
+        const linearMaximum = Number(machine.jogMaxVelocity || machine.maxVelocity || 0);
+        // Derive the unit and limit from the same axis to avoid a transient zero
+        // while dependent bindings settle when returning from C/A to X/Y/Z.
+        if (["A", "B", "C"].indexOf(jogAxis) >= 0)
+            return axisMaximum > 0 ? axisMaximum * 60 : 0;
+        return (axisMaximum > 0 ? Math.min(axisMaximum, linearMaximum) : linearMaximum) * 60;
+    }
+    readonly property string jogSpeedUnit: rotaryJog ? "度/分钟"
+        : jogAxis && machine.linearUnits === 1 ? "毫米/分钟" : "机床单位/分钟"
     readonly property bool canJog: jogSafe && canOperate && (presentation.mode === "joint"
         ? joints.indexOf(presentation.selectedJoint) >= 0 : axes.indexOf(presentation.selectedAxis) >= 0)
     signal dialogRequested(string actionId, string title, string axis)
@@ -36,8 +58,16 @@ Rectangle {
     function permitted(id) {
         return connected && (!machine.capabilities || machine.capabilities[id] !== false);
     }
+    function limitJogSpeed() {
+        if (presentation.jogVelocity > jogSpeedLimit) {
+            releaseJog();
+            presentation.jogVelocity = jogSpeedLimit;
+        }
+    }
+    onJogSpeedLimitChanged: limitJogSpeed()
     function startJog(direction) {
-        if (jogHeld || !canJog || !permitted("jog.start") || presentation.jogVelocity <= 0) return;
+        if (jogHeld || !canJog || !permitted("jog.start") || presentation.jogVelocity <= 0
+            || presentation.jogVelocity > jogSpeedLimit) return;
         jogHeld = true;
         commandRequested("jog.start", {axis: presentation.mode === "joint" ? presentation.selectedJoint : presentation.selectedAxis, direction: direction,
             velocity: presentation.jogVelocity / 60, increment: presentation.jogIncrement,
@@ -56,6 +86,7 @@ Rectangle {
         function onSelectedAxisChanged() { root.releaseJog(); }
         function onSelectedJointChanged() { root.releaseJog(); }
         function onModeChanged() { root.releaseJog(); }
+        function onJogVelocityChanged() { root.limitJogSpeed(); }
     }
 
     objectName: "manualPanel"
@@ -568,6 +599,8 @@ Rectangle {
                 visible: root.showOverrides
                 presentation: root.presentation
                 machine: root.machine
+                jogSpeedLimit: root.jogSpeedLimit
+                jogSpeedUnit: root.jogSpeedUnit
                 compact: root.compact
                 onCommandRequested: (actionId, payload) => root.commandRequested(actionId, payload)
                 onJogStopRequested: root.releaseJog()
@@ -628,3 +661,5 @@ Rectangle {
         vertical: true
     }
 }
+// END: ManualOperationPanel
+//--------//

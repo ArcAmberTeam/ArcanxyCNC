@@ -6,6 +6,8 @@ Item {
     required property ManualState presentation
     property var machine: ({})
     property bool compact: false
+    required property real jogSpeedLimit
+    required property string jogSpeedUnit
     readonly property bool connected: !!machine.connected
     signal commandRequested(string actionId, var payload)
     signal jogStopRequested()
@@ -77,10 +79,10 @@ Item {
             width: parent.width
             height: 49
             label: "点动速度"
-            to: Number(root.machine.jogMaxVelocity || root.machine.maxVelocity || 0) * 60
+            to: root.jogSpeedLimit
             value: root.presentation.jogVelocity
             enabled: root.connected
-            unit: root.machine.linearUnits === 1 ? "毫米/分钟" : "机床单位/分钟"
+            unit: root.jogSpeedUnit
             onMoved: value => { root.jogStopRequested(); root.presentation.jogVelocity = value; }
         }
 

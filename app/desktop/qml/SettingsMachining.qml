@@ -17,7 +17,7 @@ Column {
     property int targetAxisCount: activeAxes.length >= 3 && activeAxes.length <= 5 ? activeAxes.length : 3
     readonly property var targetProfile: (profileState.profiles || []).find(item => item.axis_count === targetAxisCount) || ({})
     readonly property bool switching: operation.phase === "scheduled" || operation.phase === "switching"
-    readonly property bool idle: machine.connected && machine.powered === false
+    readonly property bool idle: !!machine.connected && machine.powered === false
         && machine.busy === false && !machine.paused && machine.spindleSpeed === 0
         && machine.spindleDirection === 0
     function selectAxes(count) {
@@ -41,7 +41,7 @@ Column {
                     objectName: "machining-axes-" + modelData.count
                     width: (parent.width - 24) / 3; height: 52; kind: "tab"
                     text: modelData.count + " 轴 · " + modelData.axes
-                    selected: root.targetAxisCount === modelData.count
+                    selected: root.activeAxes.join("") === modelData.axes
                     enabled: !root.switching && !(root.axisProfiles && root.axisProfiles.busy)
                     Accessible.role: Accessible.RadioButton
                     Accessible.checkable: true
@@ -56,7 +56,7 @@ Column {
             text: root.activeAxes.length
                 ? "当前实际轴：" + root.activeAxes.join(" / ")
                     + (root.activeAxes.join("") === ({3: "XYZ", 4: "XYZC", 5: "XYZAC"})[root.targetAxisCount]
-                       ? " · 已生效" : " · 所选配置尚未生效")
+                       ? " · 已生效" : " · 目标 " + root.targetAxisCount + " 轴尚未生效")
                 : "机床未连接，实际轴数待确认"
         }
         UiText {
@@ -67,10 +67,11 @@ Column {
             objectName: "machining-profile-reason"
             width: parent.width; wrapMode: Text.WordWrap
             color: root.targetProfile.available ? Theme.secondary : Theme.warning
-            text: root.axisProfiles && root.axisProfiles.message ? root.axisProfiles.message
-                : root.targetProfile.available ? "将沿用当前机床参数，无需另备配置文件"
-                : "当前参数不足，尚未写入所选轴数"
-                    + (root.targetProfile.reason ? "\n" + root.targetProfile.reason : "")
+            text: !root.switching && !root.targetProfile.available && root.targetProfile.reason
+                ? "尚未写入目标 " + root.targetAxisCount + " 轴配置：\n" + root.targetProfile.reason
+                : root.axisProfiles && root.axisProfiles.message ? root.axisProfiles.message
+                : root.targetProfile.available ? "配置已就绪，可自动写入当前 INI / HAL"
+                : "当前参数不足，尚未写入目标 " + root.targetAxisCount + " 轴配置"
         }
         UiButton {
             objectName: "machining-profile-apply"
@@ -81,7 +82,7 @@ Column {
             onClicked: root.axisProfiles.request(root.targetAxisCount)
         }
         UiText {
-            visible: root.machine.connected && !root.idle
+            visible: !!root.machine.connected && !root.idle
             width: parent.width; wrapMode: Text.WordWrap; color: Theme.warning
             text: "请先停止加工、关闭主轴和机床使能，再应用轴数配置。"
         }
