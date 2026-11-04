@@ -8,6 +8,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+SUDO_ACCESS = """@include /etc/betterlinuxcnc/cnc-maint-sudo
+Defaults!/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account timestamp_timeout=0, !rootpw, !targetpw, !runaspw
+cnc-maint ALL=(root) PASSWD: /usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account sudo-open
+"""
+
 POLICIES = {
     "/etc/lightdm/lightdm.conf.d/90-betterlinuxcnc.conf": """[Seat:*]
 autologin-user=linuxcnc
@@ -67,7 +72,8 @@ Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/b
 root ALL=(ALL:ALL) ALL
 Defaults!/usr/lib/betterlinuxcnc/manage-ini/pa-config !use_pty
 cnc-maint ALL=(root) NOPASSWD: /usr/lib/betterlinuxcnc/manage-ini/pa-config ""
-""",
+"""
+    + SUDO_ACCESS,
     "/etc/sysctl.d/90-betterlinuxcnc.conf": "kernel.sysrq = 0\n",
     "/etc/polkit-1/rules.d/00-betterlinuxcnc-isolation.rules": """polkit.addRule(function(action, subject) {
     if (subject.user !== "linuxcnc" && subject.user !== "cnc-maint" && subject.user !== "teto") return;
@@ -207,7 +213,7 @@ def restore(previous, root=Path("/")):
 # --------#
 # BEGIN: MaintenancePolicyUpgrade
 def upgrade_maintenance(root=Path("/")):
-    """Migrate only the exact activated pre-PA policy; never activate fresh hosts."""
+    """Migrate exact activated pre-PA/PA policies; never activate fresh hosts."""
     names = ("/etc/ssh/sshd_config", "/etc/sudoers")
     grant = (
         "Defaults!/usr/lib/betterlinuxcnc/manage-ini/pa-config !use_pty\n"
@@ -215,7 +221,7 @@ def upgrade_maintenance(root=Path("/")):
     )
     legacy = {
         names[0]: POLICIES[names[0]].replace("PermitTTY yes\n", "PermitTTY no\n"),
-        names[1]: POLICIES[names[1]].replace(grant, ""),
+        names[1]: POLICIES[names[1]].replace(SUDO_ACCESS, "").replace(grant, ""),
     }
     previous = []
     for name in names:
@@ -239,7 +245,11 @@ def upgrade_maintenance(root=Path("/")):
                 content = stream.read(65537).decode("utf-8")
         except (OSError, UnicodeError):
             return "unrecognized policy preserved"
-        if content not in (legacy[name], POLICIES[name]):
+        if content not in (
+            legacy[name],
+            POLICIES[name],
+            POLICIES[name].replace(SUDO_ACCESS, ""),
+        ):
             return "unrecognized policy preserved"
         previous.append(
             {"path": name, "content": content, "mode": stat.S_IMODE(info.st_mode)}

@@ -13,6 +13,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+mod sudo_access;
 mod workspace;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -182,6 +183,9 @@ fn parse_request(request: &str) -> Result<(&str, &str)> {
 fn apply(operation: &str, password: &str) -> Result<bool> {
     validate_account()?;
     let _guard = ledger()?;
+    if operation != "status" {
+        sudo_access::close()?;
+    }
     match operation {
         "status" => {}
         "enable" => enable(password)?,
@@ -236,6 +240,7 @@ fn serve() -> Result<()> {
 }
 fn register() -> Result<()> {
     validate_account()?;
+    sudo_access::provision()?;
     workspace::provision()?;
     let mut guard = ledger()?;
     let mut marker = String::new();
@@ -331,6 +336,8 @@ pub fn run() -> Result<()> {
         return Err("Fixed root operation required".into());
     }
     match args[0].as_str() {
+        "sudo-open" => sudo_access::open(),
+        "sudo-close" => sudo_access::close(),
         "provision" => register(),
         "serve" => serve(),
         "install-serve" => workspace::serve_install(),

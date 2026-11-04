@@ -13,6 +13,9 @@ pub(crate) fn run() -> u8 {
         eprintln!("pa: Unknown command. Use pa --help.");
         return 64;
     }
+    if arguments[1..] == ["sudo", "open"] {
+        return commands::manage::sudo::open();
+    }
     let target = match commands::manage::parse(&arguments[1..]) {
         Ok(target) => target,
         Err(message) => {
