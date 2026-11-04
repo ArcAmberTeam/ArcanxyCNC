@@ -434,7 +434,7 @@ def verify_maintenance_workspace(package, source, version):
     cmake.write_text(cmake.read_text().replace("VERSION " + version, "VERSION 99.1.1.1", 1))
     metadata = checkout / "app/desktop/python/bettercnc/__init__.py"
     metadata.write_text(metadata.read_text().replace(version, "99.1.1.1"))
-    subprocess.run(["runuser", "-u", "cnc-maint", "--", helper, "workspace", "build-deb"], check=True, timeout=1500)
+    subprocess.run(["runuser", "-u", "cnc-maint", "--", helper, "workspace", "build-deb"], check=True, timeout=1500, umask=0o002)
     built = list((workspace / "packages").glob("*.deb"))
     require(len(built) == 1, "Local build did not produce one package")
     require(run("dpkg-deb", "-f", str(built[0]), "Version").stdout.strip() == version, "Local build changed the Debian version")

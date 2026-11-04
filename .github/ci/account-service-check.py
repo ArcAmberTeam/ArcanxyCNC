@@ -37,6 +37,11 @@ def main():
     shutil.copyfile(sys.argv[1], helper)
     helper.chmod(0o755)
     run(str(helper), "provision")
+    build_unit = Path("/usr/lib/systemd/system/betterlinuxcnc-cnc-maint-build@.service")
+    expected_unit = build_unit.read_text()
+    build_unit.write_text(expected_unit.replace("AmbientCapabilities=CAP_SETUID CAP_SETGID\n", ""))
+    run(str(helper), "provision")
+    assert build_unit.read_text() == expected_unit
     run("systemctl", "is-active", "--quiet", "betterlinuxcnc-cnc-maint.socket")
     build_socket = "/run/betterlinuxcnc-cnc-maint-build.sock"
     probe = """
@@ -57,7 +62,7 @@ with socket.socket(socket.AF_UNIX) as connection:
     installer = Path("/usr/bin/betterlinuxcnc-updater")
     if installer.exists():
         raise RuntimeError("Refuse to replace an existing updater")
-    installer.write_text("#!/usr/bin/python3\nimport os, sys\nassert os.getuid() == 0\nassert sys.argv[1:] == ['maintenance-install']\nassert sys.stdin.buffer.read() == b'local-package-fixture'\n")
+    installer.write_text("#!/usr/bin/python3\nimport os, sys, subprocess\nassert os.getuid() == 0\nassert sys.argv[1:] == ['maintenance-install']\nassert subprocess.check_output(['/usr/sbin/runuser', '-u', 'linuxcnc', '--', '/usr/bin/id', '-un'], text=True).strip() == 'linuxcnc'\nassert sys.stdin.buffer.read() == b'local-package-fixture'\n")
     installer.chmod(0o755)
     def upload(expected):
         run("runuser", "-u", "cnc-maint", "--", "/usr/bin/python3", "-c", probe, build_socket, expected)

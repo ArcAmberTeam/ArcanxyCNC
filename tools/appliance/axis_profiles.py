@@ -64,6 +64,54 @@ def relative_file(name):
     return path
 
 
+def migration_base(files, ini_name):
+    """Recover a verified axis-settings base for legacy migration recognition.
+
+    The caller owns protected file reads and validates the recovered base against
+    the original migration manifest. No active machine files are changed here.
+    """
+    marker = ".axis-settings-source.json"
+    if marker not in files:
+        return files
+    saved = json.loads(files[marker])
+    current = files[ini_name]
+    if (
+        not isinstance(saved, dict)
+        or saved.get("schema_version") != 1
+        or saved.get("ini") != ini_name
+        or not isinstance(saved.get("base_ini"), str)
+        or hashlib.sha256(current).hexdigest()
+        not in saved.get("accepted_ini_hashes", [])
+    ):
+        raise ValueError("Invalid axis-settings migration base")
+    base = saved["base_ini"]
+    names = hal_files(base)
+    base_hal = {name: files[str(relative_file(name))] for name in names}
+    if saved.get("hal_hashes") != {
+        name: hashlib.sha256(data).hexdigest() for name, data in base_hal.items()
+    }:
+        raise ValueError("Axis-settings base HAL changed")
+    result = dict(files)
+    del result[marker]
+    for name, data in files.items():
+        if name.startswith(".axis-settings-") and name.endswith(".hal"):
+            if name != ".axis-settings-" + hashlib.sha256(data).hexdigest() + ".hal":
+                raise ValueError("Generated axis-settings HAL changed")
+            del result[name]
+    if current != base.encode():
+        ini, generated = generate(
+            base,
+            {name: data.decode() for name, data in base_hal.items()},
+            axis_count(current.decode()),
+        )
+        if current != ini.encode() or any(
+            files.get(name) != data.encode() for name, data in generated.items()
+        ):
+            raise ValueError("Active axis settings differ from their saved base")
+    result[ini_name] = base.encode()
+    return result
+
+
 # --------#
 # BEGIN: AxisProfileStore
 class AxisProfileStore:

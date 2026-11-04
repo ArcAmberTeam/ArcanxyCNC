@@ -15,6 +15,7 @@ unsafe extern "C" {
     fn geteuid() -> u32;
     fn getgid() -> u32;
     fn flock(fd: i32, operation: i32) -> i32;
+    fn umask(mask: u32) -> u32;
 }
 fn command(program: &str) -> Command {
     let mut command = Command::new(program);
@@ -250,6 +251,9 @@ assert record['application_version'] == version, 'Installed homing provenance ve
     Ok(())
 }
 pub fn run() -> Result<()> {
+    // SSH sessions may inherit 0002. System package directories must never be
+    // group-writable; the independent installer still validates every entry.
+    unsafe { umask(0o022) };
     let args: Vec<_> = std::env::args().skip(1).collect();
     workspace()?;
     let lock = OpenOptions::new()
