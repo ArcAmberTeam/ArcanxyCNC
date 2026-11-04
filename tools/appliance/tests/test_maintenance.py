@@ -207,6 +207,21 @@ class MaintenanceTests(unittest.TestCase):
             self.assertEqual(result.returncode, 64, result.stdout + result.stderr)
             self.assertIn("error", json.loads(result.stdout))
 
+    def test_axis_status_and_logs_use_only_the_fixed_read_only_cli(self):
+        for requested in ("axis-status", "logs"):
+            with (
+                patch.object(sys, "argv", [str(SCRIPT)]),
+                patch.dict(os.environ, {"SSH_ORIGINAL_COMMAND": requested}),
+                patch.object(
+                    maintenance, "command", return_value={"exit": 0}
+                ) as command,
+                patch("builtins.print"),
+            ):
+                self.assertEqual(maintenance.main(), 0)
+            command.assert_called_once_with(
+                ["/usr/sbin/betterlinuxcnc-appliance", "axis-profile", "status"]
+            )
+
     def test_management_routes_exact_targets_without_a_shell_or_environment_inheritance(
         self,
     ):

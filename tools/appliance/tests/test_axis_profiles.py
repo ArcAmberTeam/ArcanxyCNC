@@ -43,6 +43,9 @@ def run(command, **kwargs):
     with (root / 'calls.jsonl').open('a') as stream:
         import json
         stream.write(json.dumps(command) + '\n')
+    if command[:2] == ['/usr/bin/betterlinuxcnc-updater', 'axis-maintenance']:
+        kwargs['stderr'].write(b'x' * 10000 + b'Precise maintenance failure')
+        raise subprocess.CalledProcessError(1, command)
     if command == ['/usr/sbin/betterlinuxcnc-appliance', 'backup']:
         if fault == 'backup':
             raise subprocess.CalledProcessError(1, command)
@@ -354,6 +357,16 @@ class AxisProfileCliTests(unittest.TestCase):
         hal.write_text(self.original_hal)
         hal.chmod(0o666)
         self.assertNotEqual(self.invoke("prepare-system", "5").returncode, 0)
+
+    def test_switch_failure_preserves_bounded_actual_error_for_gui_and_ssh(self):
+        result = self.invoke("switch-system", "5")
+        self.assertNotEqual(result.returncode, 0)
+        status = json.loads(self.invoke("status").stdout)
+        self.assertEqual(status["operation"]["phase"], "error")
+        detail = status["operation"]["message"]
+        self.assertLessEqual(len(detail.encode()), 8192)
+        self.assertTrue(detail.endswith("Precise maintenance failure"))
+        self.assertEqual(self.ini.read_text(), self.original)
 
     def test_dead_service_does_not_leave_permanent_switching_status(self):
         directory = self.root / "status"

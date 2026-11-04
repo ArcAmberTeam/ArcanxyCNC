@@ -133,6 +133,8 @@ class AxisProfiles(QObject):
                     or operation.get("phase")
                     not in ("scheduled", "switching", "configured", "error")
                     or operation.get("axis_count") not in (3, 4, 5)
+                    or not isinstance(operation.get("message", ""), str)
+                    or len(operation.get("message", "")) > 8192
                     or type(operation.get("started_at")) not in (int, float)
                     or not math.isfinite(operation["started_at"])
                 ):
@@ -152,6 +154,8 @@ class AxisProfiles(QObject):
                     "configured": "INI / HAL 已写入；以连接后的实际轴数确认是否生效",
                     "error": "切换未完成，请查看配置切换服务日志；未确认成功前不要加工",
                 }.get((operation or {}).get("phase"), "")
+                if operation and operation["phase"] == "error" and operation.get("message"):
+                    self._message = "切换未完成：\n" + operation["message"]
         except (ValueError, TypeError, AttributeError, KeyError):
             # A lost acknowledgement does not cancel an independently started job.
             self._state = {

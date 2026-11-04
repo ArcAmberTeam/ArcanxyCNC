@@ -136,6 +136,7 @@ def main():
     if args.action == "provision":
         _accounts.provision()
         axis_profiles.install_integration()
+        print("Maintenance policy: " + _policy.upgrade_maintenance())
         account_manager = Path(
             "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account"
         )

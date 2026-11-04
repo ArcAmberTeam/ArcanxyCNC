@@ -504,6 +504,14 @@ def main():
     run("ssh-keygen", "-A")
     Path("/run/sshd").mkdir(exist_ok=True)
     run("/usr/sbin/betterlinuxcnc-appliance", "activate")
+    # Reproduce an activated pre-PA appliance, then upgrade through real postinst.
+    ssh_policy = Path("/etc/ssh/sshd_config")
+    sudo_policy = Path("/etc/sudoers")
+    ssh_policy.write_text(ssh_policy.read_text().replace("PermitTTY yes", "PermitTTY no"))
+    sudo_policy.write_text("\n".join(line for line in sudo_policy.read_text().split("\n") if "pa-config" not in line))
+    run("dpkg", "--force-confold", "--install", str(package))
+    require(password_digest() == password, "Maintenance policy migration changed credentials")
+    require(list(Path("/var/lib/betterlinuxcnc/recovery").glob("*-pa-policy/policies.json")), "Missing pre-PA policy recovery")
     run("/usr/sbin/sshd", "-t")
     run("/usr/sbin/visudo", "-c")
     effective = run("/usr/sbin/sshd", "-T", "-C", "user=cnc-maint,host=localhost,addr=127.0.0.1").stdout

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 LOG_ROOT = Path("/var/log/betterlinuxcnc/launcher")
-ALLOWED = ("help", "version", "status", "logs", "diagnostics")
+ALLOWED = ("help", "version", "status", "logs", "diagnostics", "axis-status")
 PA_COMMANDS = (("pa", "manage", "ini"), ("pa", "manage", "launcher.json"))
 RUN_NAME = re.compile(r"[0-9]{8}-[0-9]{6}-[1-9][0-9]*")
 LOG_NAME = re.compile(r"(?:controller|linuxcnc|cam-link)-[1-9][0-9]*\.log")
@@ -166,7 +166,16 @@ def main():
             "privilegeEscalation": False,
         }
     elif name == "logs":
-        payload = {"logs": logs()}
+        payload = {
+            "logs": logs(),
+            "axisProfiles": command(
+                ["/usr/sbin/betterlinuxcnc-appliance", "axis-profile", "status"]
+            ),
+        }
+    elif name == "axis-status":
+        payload = command(
+            ["/usr/sbin/betterlinuxcnc-appliance", "axis-profile", "status"]
+        )
     elif name == "version":
         payload = command(
             [

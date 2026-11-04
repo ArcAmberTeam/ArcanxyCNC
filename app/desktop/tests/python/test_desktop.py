@@ -108,6 +108,12 @@ class DesktopTests(unittest.TestCase):
         self.assertTrue(all(command in (["status"], ["request", "5"]) for command in commands))
         self.assertFalse(self.actions())
         self.assertNotEqual(self.backend.snapshot.get("axes"), ["X", "Y", "Z", "A", "C"])
+        record["operation"].update(phase="error", message="Maintenance requires disabled machine")
+        status.write_text(json.dumps(record))
+        adapter.refresh()
+        self.wait(lambda: not adapter.busy)
+        self.assertIn("Maintenance requires disabled machine", adapter.message)
+        self.assertFalse(self.actions())
 
     def test_axis_profiles_reject_invalid_status_without_enabling_requests(self):
         adapter, _status, calls = self.axis_profile_peer({"component": "wrong"})
