@@ -4,6 +4,7 @@ import json
 import shutil
 import sys
 
+from bettercnc_error_records import report
 from PySide6.QtCore import Property, QCoreApplication, QObject, QProcess, QTimer, Signal, Slot
 
 from bettercnc import __version__
@@ -60,6 +61,7 @@ class FirmwareUpdater(QObject):
     available = Property(bool, lambda self: self._available, constant=True)
 
     def _error(self, message):
+        report("updater", "adapter_error", message)
         self._timer.stop()
         self._state = {"phase": "error", "message": message, "progress": 0, "version": ""}
         self.changed.emit()

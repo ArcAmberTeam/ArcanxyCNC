@@ -62,20 +62,26 @@ for source in (ROOT / "qml").glob("*.qml"):
 # Application launchers are composition roots with one declared dependency.
 PYTHON_GRAPH = {
     "bettercnc": set(),
-    "bettercnc.desktop": {"bettercnc", "bettercnc.session"},
+    "bettercnc.desktop": {"bettercnc", "bettercnc.session", "bettercnc_error_records"},
     "bettercnc.session": set(),
-    "betterlinuxcnc_service": {"bettercnc_controller", "bettercnc_preview"},
-    "bettercnc_controller": set(),
+    "betterlinuxcnc_service": {
+        "bettercnc_controller",
+        "bettercnc_preview",
+        "bettercnc_error_records",
+    },
+    "bettercnc_controller": {"bettercnc_error_records"},
+    "bettercnc_error_records": set(),
     "bettercnc_preview": set(),
     "desktop-launcher": {"bettercnc.desktop"},
     "service-launcher": {"betterlinuxcnc_service"},
-    "bettercnc_launcher": set(),
+    "bettercnc_launcher": {"bettercnc_error_records"},
     "orchestration-launcher": {"bettercnc_launcher"},
 }
 PYTHON_ROOTS = [
     ROOT / "python",
     REPOSITORY / "app/controller/src",
     REPOSITORY / "app/launcher/src",
+    REPOSITORY / "app/platform/error-records/python/src",
 ]
 VENDOR_MODULES = {"linuxcnc", "gcode", "hal"}
 # Preview's read-only linuxcnc.stat poll initializes native tool data before

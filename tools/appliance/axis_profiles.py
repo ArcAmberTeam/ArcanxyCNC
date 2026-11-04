@@ -15,6 +15,7 @@ import time
 from pathlib import Path, PurePosixPath
 
 from axis_configuration import AXES, axis_count, generate, hal_files
+from bettercnc_error_records import report
 
 CONFIG = Path("/etc/betterlinuxcnc")
 LEASE = Path("/var/lib/betterlinuxcnc/configuration.lock")
@@ -467,6 +468,7 @@ def run(operation, count=None, revision=None):
                 errors.seek(0, os.SEEK_END)
                 errors.seek(max(0, errors.tell() - 8192))
                 detail = errors.read().decode("utf-8", "replace").strip()
+                report("configuration", "axis_switch_failed", detail or str(error))
                 result.update(phase="error", message=detail or str(error))
                 atomic_json(PUBLIC / "status.json", result)
                 if detail:

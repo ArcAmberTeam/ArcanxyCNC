@@ -23,6 +23,11 @@ pub(crate) fn run() -> u8 {
     match terminal::open(target, &mut std::io::stdin().lock(), &mut std::io::stdout()) {
         Ok(()) => 0,
         Err(error) => {
+            betterlinuxcnc_error_client::report(
+                "configuration",
+                "ini_operation_failed",
+                &error.to_string(),
+            );
             eprintln!("pa: {error}");
             74
         }

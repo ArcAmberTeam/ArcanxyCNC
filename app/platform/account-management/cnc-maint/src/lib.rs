@@ -222,7 +222,14 @@ fn serve() -> Result<()> {
     })();
     let reply = match result {
         Ok(state) => response(state),
-        Err(_) => "{\"ok\":false}\n".into(),
+        Err(_) => {
+            betterlinuxcnc_error_client::report(
+                "account",
+                "account_request_refused",
+                "Maintenance account request refused",
+            );
+            "{\"ok\":false}\n".into()
+        }
     };
     stream.write_all(reply.as_bytes())?;
     Ok(())

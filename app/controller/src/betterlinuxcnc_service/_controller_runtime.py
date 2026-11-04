@@ -8,6 +8,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
+from bettercnc_error_records import report
+
 from bettercnc_controller import Controller, StatusReader
 
 from ._preview_jobs import PreviewJobs
@@ -126,7 +128,8 @@ class ControllerRuntime:
             if self._controller is not None and not self._releasing:
                 try:
                     await self._work(self._poll, self._generation)
-                except Exception:
+                except Exception as error:
+                    report("service", "poll_error", str(error))
                     # A vendor adapter exception must not make a stale online
                     # snapshot available to command/preview callers.
                     self._snapshot = None

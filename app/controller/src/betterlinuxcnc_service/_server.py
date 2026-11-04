@@ -11,6 +11,8 @@ import struct
 import tempfile
 from pathlib import Path
 
+from bettercnc_error_records import install_exception_hooks, report
+
 from ._controller_runtime import ControllerRuntime
 from ._protocol import MAX_FRAME_BYTES, ProtocolError, decode, encode, health
 
@@ -98,12 +100,14 @@ async def serve(
                         result = await runtime.handle(owner, request.method, request.params)
                     reply = encode(request.version, request.request_id, result=result)
                 except ProtocolError as error:
+                    report("service", "protocol_error", str(error))
                     reply = encode(
                         request.version if request else error.version,
                         request.request_id if request else error.request_id,
                         error=error,
                     )
                 except (ValueError, OSError, RuntimeError) as error:
+                    report("service", "request_error", str(error))
                     reply = encode(
                         request.version if request else 2,
                         request.request_id if request else "",
@@ -162,6 +166,7 @@ async def serve(
 
 
 def main() -> None:
+    install_exception_hooks("service")
     parser = argparse.ArgumentParser(description="BetterLinuxCNC local controller service")
     parser.add_argument("--socket", type=Path, default=default_socket())
     parser.add_argument("--ini", type=Path)

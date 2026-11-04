@@ -3,6 +3,7 @@
 import json
 import sys
 
+from bettercnc_error_records import report
 from PySide6.QtCore import Property, QObject, QProcess, QTimer, Signal, Slot
 
 
@@ -87,13 +88,15 @@ class MaintenanceAccount(QObject):
             self._enabled = record["enabled"]
             self._known = True
             self._message = "维护登录已开启" if self._enabled else "维护登录已关闭，旧密码已清除"
-        except (ValueError, TypeError, AttributeError):
+        except (ValueError, TypeError, AttributeError) as error:
+            report("account", "adapter_error", str(error))
             self._known = False
             self._message = "未能确认账户状态，请刷新重试；不要将请求视为已生效"
         self.changed.emit()
 
     def _failed(self, error):
         if error == QProcess.FailedToStart:
+            report("account", "service_unavailable", self._process.errorString())
             self._deadline.stop()
             self._busy = False
             self._known = False

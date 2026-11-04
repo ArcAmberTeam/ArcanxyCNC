@@ -5,6 +5,7 @@ import math
 import sys
 import time
 
+from bettercnc_error_records import report
 from PySide6.QtCore import Property, QObject, QProcess, QTimer, Signal, Slot
 
 
@@ -156,7 +157,8 @@ class AxisProfiles(QObject):
                 }.get((operation or {}).get("phase"), "")
                 if operation and operation["phase"] == "error" and operation.get("message"):
                     self._message = "切换未完成：\n" + operation["message"]
-        except (ValueError, TypeError, AttributeError, KeyError):
+        except (ValueError, TypeError, AttributeError, KeyError) as error:
+            report("configuration", "adapter_error", str(error))
             # A lost acknowledgement does not cancel an independently started job.
             self._state = {
                 "profiles": [],
@@ -168,6 +170,7 @@ class AxisProfiles(QObject):
 
     def _failed(self, error):
         if error == QProcess.FailedToStart:
+            report("configuration", "service_unavailable", self._process.errorString())
             self._deadline.stop()
             self._busy = False
             self._state = {"profiles": [], "configured_axis_count": None, "operation": None}

@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
+file(GLOB_RECURSE error_record_client_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../error-records/client/src/*.rs")
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(BetterLinuxCNCUpdater LANGUAGES NONE)
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/ApplicationInstall.cmake")
@@ -20,7 +21,7 @@ else()
         COMMAND "${CMAKE_COMMAND}" -E env "CARGO_TARGET_DIR=${updater_target}"
             "${CARGO_EXECUTABLE}" build --release --locked --bin betterlinuxcnc-updater
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        DEPENDS ${updater_sources} ${local_update_sources} ../local-update/Cargo.toml src/updater/package_members.py Cargo.toml Cargo.lock rust-toolchain.toml
+        DEPENDS ${error_record_client_sources} ${updater_sources} ${local_update_sources} ../local-update/Cargo.toml src/updater/package_members.py Cargo.toml Cargo.lock rust-toolchain.toml
         VERBATIM)
     add_custom_target(betterlinuxcnc-updater-service ALL DEPENDS "${updater_binary}")
 endif()

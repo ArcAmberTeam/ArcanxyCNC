@@ -10,6 +10,7 @@ import shutil
 import time
 from pathlib import Path
 
+from bettercnc_error_records import report
 from PySide6.QtCore import (
     Property,
     QEvent,
@@ -113,6 +114,7 @@ class DesktopBackend(QObject):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.start)
         self._worker.snapshotReady.connect(self._publish)
+        self.errorOccurred.connect(self._record_error)
         self._worker.rejected.connect(self.errorOccurred)
         self._worker.accepted.connect(self._command_accepted)
         self.commandRequested.connect(self._worker.dispatch)
@@ -246,6 +248,14 @@ class DesktopBackend(QObject):
         if self._preview_signature is not None and signature != self._preview_signature:
             self._program.preview(context)
         self._preview_signature = signature
+
+    def _record_error(self, message):
+        # Controller-origin errors are recorded once by their owning process.
+        if message == self._snapshot.get("commandMessage") or any(
+            item.get("message") == message for item in self._snapshot.get("errors", [])
+        ):
+            return
+        report("desktop", "ui_error", message)
 
     @Slot(str, "QVariantMap", result=bool)
     def dispatch(self, action, payload):

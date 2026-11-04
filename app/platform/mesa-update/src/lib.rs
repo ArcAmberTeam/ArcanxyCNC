@@ -84,6 +84,11 @@ fn finish(result: Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            betterlinuxcnc_error_client::report(
+                "mesa-update",
+                "operation_failed",
+                &error.to_string(),
+            );
             // HTTP errors are reduced to fixed descriptions by the release adapter.
             eprintln!("{error}");
             ExitCode::FAILURE

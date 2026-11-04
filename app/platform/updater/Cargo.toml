@@ -7,6 +7,7 @@ license = "GPL-2.0-or-later"
 description = "Verified Debian Release updates for BetterLinuxCNC"
 
 [dependencies]
+betterlinuxcnc-error-client = { path = "../error-records/client" }
 betterlinuxcnc-local-update = { path = "../local-update" }
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"

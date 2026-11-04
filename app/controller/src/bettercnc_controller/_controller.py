@@ -8,6 +8,8 @@ from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
 
+from bettercnc_error_records import report
+
 from ._config import AXES, SYSTEMS, Configuration
 from ._files import atomic_write, confined_path, tool_table
 from ._homing_requests import HomingRequests
@@ -49,6 +51,7 @@ class Controller:
         self._closed = False
         self._steps = deque()
         self._action = ""
+        self._error_context = {}
         self._jogs = set()
         self._errors = deque(maxlen=100)
         self._command_state = "idle"
@@ -63,6 +66,8 @@ class Controller:
         return getattr(self._module, name)
 
     def _result(self, state, message):
+        if state in ("error", "unknown"):
+            report("controller", "command_" + state, message, self._error_context)
         if (
             self._cam_job
             and self._cam_job["state"] in ACTIVE
@@ -102,6 +107,8 @@ class Controller:
         return "回零不可用：HOME_SEQUENCE 或轴配置无效"
 
     def _disconnect(self, message):
+        if self._snapshot.get("connected") or self._snapshot.get("message") != message:
+            report("controller", "connection_lost", message, self._error_context)
         if self._cam_job and self._cam_job["state"] in ACTIVE:
             try:
                 self._update_cam(self._cam_job, "unknown", "连接中断；加工结果未知，不会重放")
@@ -154,6 +161,8 @@ class Controller:
                 kind, message = error
                 is_error = kind in (self._constant("NML_ERROR"), self._constant("OPERATOR_ERROR"))
                 self._errors.append({"kind": int(kind), "message": str(message), "error": is_error})
+                if is_error and not self._steps:
+                    report("controller", "native_error", str(message), {"action": self._action})
                 if is_error and self._steps:
                     self._result("error", str(message))
             if self._cam_job and self._cam_job["state"] in ACTIVE:
@@ -373,6 +382,15 @@ class Controller:
             "max-velocity": "velocity.max",
         }
         action = aliases.get(action, action)
+        self._error_context = {
+            "action": action,
+            **{
+                key: payload[key]
+                for key in ("axis", "joint", "mode", "velocity", "increment", "direction")
+                if key in payload
+            },
+            **{key: self._snapshot.get(key) for key in ("motionMode", "powered", "estop", "busy")},
+        }
         try:
             self._guard("connected")
             emergency = (
@@ -404,6 +422,7 @@ class Controller:
         except (ValueError, TypeError, KeyError, AttributeError, OverflowError, OSError) as error:
             # Rejection cannot silently discard a previously accepted command.
             if self._steps:
+                report("controller", "command_rejected", str(error), self._error_context)
                 self._errors.append({"kind": 0, "error": True, "message": str(error)})
                 self._publish()
             else:
@@ -750,6 +769,7 @@ class Controller:
                     )
                     index = joints[0]
                 limit = config.joint_limits.get(index)
+            self._error_context["limit"] = limit
             self._require(limit is not None and limit > 0, "INI 缺少所选轴或 joint 的最大速度")
             velocity = self._number(payload.get("velocity"), "点动速度 (机床单位/秒)", 0, limit)
             self._require(velocity > 0, "点动速度必须大于零")

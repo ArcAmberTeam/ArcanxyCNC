@@ -137,6 +137,12 @@ def main():
         words = []
     if not words:
         words = ["help"]
+    if words[0] == "errors":
+        os.execve(
+            "/usr/lib/betterlinuxcnc/error-records/betterlinuxcnc-error-records",
+            ["betterlinuxcnc-error-records", "query", *words[1:]],
+            {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+        )
     if words[0] in ("git", "build-deb", "install-deb", "build-status"):
         os.execve(
             "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account",
@@ -172,6 +178,12 @@ def main():
                 "build-deb",
                 "build-status",
                 "install-deb FILE",
+            ],
+            "errorCommands": [
+                "errors",
+                "errors status",
+                "errors <category>",
+                "errors <event-id>",
             ],
             "buildDirectory": "/var/lib/betterlinuxcnc/build",
             "shell": False,

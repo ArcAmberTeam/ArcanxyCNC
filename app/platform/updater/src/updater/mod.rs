@@ -67,9 +67,13 @@ struct Event {
 
 impl Event {
     fn new(phase: &str, message: impl Into<String>, version: &str, progress: u8) -> Self {
+        let message = message.into();
+        if phase == "error" {
+            betterlinuxcnc_error_client::report("updater", "update_error", &message);
+        }
         Self {
             phase: phase.into(),
-            message: message.into(),
+            message,
             version: version.into(),
             progress,
             self_compiled: false,

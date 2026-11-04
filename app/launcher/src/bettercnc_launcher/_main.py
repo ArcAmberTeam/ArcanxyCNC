@@ -6,6 +6,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from bettercnc_error_records import install_exception_hooks, report
+
 from ._autostart import run_kiosk_session, start_session
 from ._config import load
 from ._configuration_lease import configuration_lease
@@ -13,6 +15,7 @@ from ._supervisor import RecoveryBlocked, Runtime
 
 
 def main(argv=None):
+    install_exception_hooks("launcher")
     parser = argparse.ArgumentParser(description="BetterLinuxCNC 标准库启动编排")
     parser.add_argument("--config", type=Path, help="项目启动配置，默认 ./launcher.json")
     parser.add_argument("--ini", help="覆盖本次启动的 INI 路径")
@@ -41,7 +44,9 @@ def main(argv=None):
                 os.umask(0o077)
                 return Runtime(config, keep_alive=not args.once).run()
     except RecoveryBlocked as error:
+        report("launcher", "startup_blocked", str(error))
         print(f"无法启动：{error}")
         return 78
     except (subprocess.SubprocessError, OSError, ValueError) as error:
+        report("launcher", "startup_error", str(error))
         parser.exit(1, f"无法启动：{error}\n")

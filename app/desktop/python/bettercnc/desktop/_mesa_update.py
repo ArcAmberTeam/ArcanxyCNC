@@ -4,6 +4,7 @@ import json
 import shutil
 import sys
 
+from bettercnc_error_records import report
 from PySide6.QtCore import Property, QObject, QProcess, QTimer, Signal, Slot
 
 
@@ -43,6 +44,7 @@ class _MesaProcess(QObject):
     available = Property(bool, lambda self: self._available, constant=True)
 
     def _error(self, message):
+        report("mesa-update", "adapter_error", message)
         self._state = {"phase": "error", "message": message}
         self.changed.emit()
 
