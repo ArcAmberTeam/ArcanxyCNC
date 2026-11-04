@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 PROFILE = "zhulong-v2"
-VENDOR_COMMIT = "3c45d80ac831f654c74cf17b52258bdeadc1bb17"
+VENDOR_COMMIT = "eb3bddbd662dfb39ac16265f70027f39930c4f1b"
 AXES = (("X", 0, 20, "neg", -1), ("Y", 1, 21, "pos", 1), ("Z", 2, 22, "neg", -1))
 BEGIN = "# BEGIN BetterLinuxCNC Zhulong inputs v1\n"
 END = "# END BetterLinuxCNC Zhulong inputs v1\n"
