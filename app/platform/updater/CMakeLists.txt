@@ -15,11 +15,12 @@ else()
     set(updater_target "${CMAKE_CURRENT_BINARY_DIR}/cargo")
     set(updater_binary "${updater_target}/release/betterlinuxcnc-updater")
     file(GLOB_RECURSE updater_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.rs")
+    file(GLOB_RECURSE local_update_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../local-update/src/*.rs")
     add_custom_command(OUTPUT "${updater_binary}"
         COMMAND "${CMAKE_COMMAND}" -E env "CARGO_TARGET_DIR=${updater_target}"
             "${CARGO_EXECUTABLE}" build --release --locked --bin betterlinuxcnc-updater
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        DEPENDS ${updater_sources} src/updater/package_members.py Cargo.toml Cargo.lock rust-toolchain.toml
+        DEPENDS ${updater_sources} ${local_update_sources} ../local-update/Cargo.toml src/updater/package_members.py Cargo.toml Cargo.lock rust-toolchain.toml
         VERBATIM)
     add_custom_target(betterlinuxcnc-updater-service ALL DEPENDS "${updater_binary}")
 endif()

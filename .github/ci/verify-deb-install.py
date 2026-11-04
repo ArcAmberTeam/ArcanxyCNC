@@ -409,6 +409,54 @@ def verify_pa_configuration():
         launcher.write_bytes(previous_launcher)
 
 
+def verify_maintenance_workspace(package, source, version):
+    """Build through the installed non-root CLI; inspect artifacts without running CNC."""
+    helper = "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account"
+    workspace = Path("/var/lib/betterlinuxcnc/build")
+    ownership(str(workspace), "root", "root", 0o755)
+    for child in ("src", "work", "packages", "home"):
+        ownership(str(workspace / child), "cnc-maint", "cnc-maint", 0o700)
+    result = run("runuser", "-u", "cnc-maint", "--", helper, "workspace", "build-status")
+    require(str(workspace) in result.stdout, "Maintenance workspace is unavailable")
+    for account in ("root", "linuxcnc", "nobody"):
+        result = subprocess.run(["runuser", "-u", account, "--", helper, "workspace", "build-status"], capture_output=True)
+        require(result.returncode != 0, "Workspace accepted an unauthorized OS account")
+    for args in (("git", "clone", "file:///etc"), ("git", "-c", "alias.x=!id", "x"), ("install-deb", "../outside.deb")):
+        result = subprocess.run(["runuser", "-u", "cnc-maint", "--", helper, "workspace", *args], capture_output=True)
+        require(result.returncode != 0, "Workspace accepted an unsupported command")
+    # The checkout is a CI fixture; production Git remains HTTPS-only.
+    import shutil
+    checkout = workspace / "src/ArcanxyCNC"
+    shutil.copytree(source, checkout, ignore=shutil.ignore_patterns(".git", "__pycache__", "target"))
+    run("chown", "-R", "cnc-maint:cnc-maint", str(checkout))
+    run("runuser", "-u", "cnc-maint", "--", helper, "workspace", "build-deb", timeout=1500)
+    built = list((workspace / "packages").glob("*.deb"))
+    require(len(built) == 1, "Local build did not produce one package")
+    require(run("dpkg-deb", "-f", str(built[0]), "Version").stdout.strip() == version, "Local build changed the Debian version")
+    validate_deb_paths(built[0], source)
+    for path in ("usr/lib/linuxcnc/modules/zhulong_homing.so", "usr/share/betterlinuxcnc/homing/provenance.json"):
+        with tempfile.TemporaryDirectory() as temporary:
+            run("dpkg-deb", "-x", str(built[0]), temporary)
+            require((Path(temporary) / path).read_bytes() == (Path("/") / path).read_bytes(), "Local build replaced the commissioned homing payload")
+    # Exercise origin presentation with a real root-owned record, no machine operation.
+    origin = Path("/var/lib/betterlinuxcnc/build-origin.json")
+    origin.write_text(json.dumps({"schema_version": 1, "version": version, "sha256": hashlib.sha256(built[0].read_bytes()).hexdigest()}))
+    origin.chmod(0o644)
+    try:
+        state = json.loads(run("betterlinuxcnc-updater", "status", env={"PATH":"/usr/bin:/bin", "HOME":"/root"}).stdout)
+        require(state["self_compiled"] is True, "Self-compiled origin is not visible")
+    finally:
+        origin.unlink()
+    state = json.loads(run("betterlinuxcnc-updater", "status", env={"PATH":"/usr/bin:/bin", "HOME":"/root"}).stdout)
+    require(state["self_compiled"] is False, "Official origin did not clear")
+    # Missing machine context must refuse the explicit upload before installation.
+    before = run("dpkg-query", "-W", "-f=${Version}", "betterlinuxcnc-qt").stdout
+    result = subprocess.run(["betterlinuxcnc-updater", "maintenance-install"], stdin=built[0].open("rb"), capture_output=True)
+    require(result.returncode != 0, "Local installation ran without a managed controller context")
+    require(run("dpkg-query", "-W", "-f=${Version}", "betterlinuxcnc-qt").stdout == before, "Rejected installation changed package state")
+    print("Installed maintenance CLI built a same-version DEB as cnc-maint; archive, retained HOMEMOD, origin and preflight refusal verified")
+
+
 def main():
     require(os.environ.get("GITHUB_ACTIONS") == "true" and os.geteuid() == 0, "GitHub CI container required")
     package, source = map(Path, sys.argv[1:])
@@ -459,6 +507,7 @@ def main():
     installed_version = run("/usr/bin/python3", "-c", "import sys; sys.path.insert(0, '/usr/lib/betterlinuxcnc/python'); from bettercnc import __version__; print(__version__)").stdout.strip()
     require(installed_version == version, "Installed application version mismatch")
     verify_installed_homing(source, version)
+    verify_maintenance_workspace(package, source, version)
 
     # PA is installed in PATH without aliases, shell profiles, or elevated mode.
     ownership("/usr/bin/pa", "root", "root", 0o755, directory=False)

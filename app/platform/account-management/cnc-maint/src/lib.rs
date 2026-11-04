@@ -1,4 +1,4 @@
-//! Fixed cnc-maint ownership boundary. No machine operations or arbitrary accounts.
+//! Fixed cnc-maint account, build workspace and local package request boundary.
 //! CLI: provision (root, one-time revocation), enable/disable/status (root),
 //! serve (root, systemd connected socket on stdin), request OP (operator).
 //! Passwords enter stdin/socket only. Replies contain booleans, never credentials.
@@ -12,6 +12,8 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
+
+mod workspace;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const SOCKET: &str = "/run/betterlinuxcnc-cnc-maint.sock";
@@ -227,6 +229,7 @@ fn serve() -> Result<()> {
 }
 fn register() -> Result<()> {
     validate_account()?;
+    workspace::provision()?;
     let mut guard = ledger()?;
     let mut marker = String::new();
     guard.read_to_string(&mut marker)?;
@@ -237,8 +240,13 @@ fn register() -> Result<()> {
     } else if marker != "revoked-v1\n" {
         return Err("Unknown policy ledger".into());
     }
-    for (suffix, contents) in [(".socket", SOCKET_UNIT), ("@.service", SERVICE_UNIT)] {
-        let path = std::path::PathBuf::from(format!("/usr/lib/systemd/system/{UNIT}{suffix}"));
+    for (unit, suffix, contents) in [
+        (UNIT, ".socket", SOCKET_UNIT),
+        (UNIT, "@.service", SERVICE_UNIT),
+        (workspace::UNIT, ".socket", workspace::SOCKET_UNIT),
+        (workspace::UNIT, "@.service", workspace::SERVICE_UNIT),
+    ] {
+        let path = std::path::PathBuf::from(format!("/usr/lib/systemd/system/{unit}{suffix}"));
         trusted_parent(&path)?;
         if path.try_exists()? {
             let info = fs::symlink_metadata(&path)?;
@@ -261,13 +269,21 @@ fn register() -> Result<()> {
     }
     fixed(
         "/usr/bin/systemctl",
-        &["enable", "betterlinuxcnc-cnc-maint.socket"],
+        &[
+            "enable",
+            "betterlinuxcnc-cnc-maint.socket",
+            "betterlinuxcnc-cnc-maint-build.socket",
+        ],
     )?;
     if Path::new("/run/systemd/system").is_dir() {
         fixed("/usr/bin/systemctl", &["daemon-reload"])?;
         fixed(
             "/usr/bin/systemctl",
-            &["start", "betterlinuxcnc-cnc-maint.socket"],
+            &[
+                "start",
+                "betterlinuxcnc-cnc-maint.socket",
+                "betterlinuxcnc-cnc-maint-build.socket",
+            ],
         )?;
     }
     Ok(())
@@ -275,6 +291,9 @@ fn register() -> Result<()> {
 /// Public CLI entry point. No caller-selected account, file, executable, or socket.
 pub fn run() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "workspace") {
+        return workspace::run(&args[1..]);
+    }
     if args.len() == 2 && args[0] == "request" {
         if unsafe { geteuid() } != operator_uid()? {
             return Err("Operator required".into());
@@ -307,6 +326,7 @@ pub fn run() -> Result<()> {
     match args[0].as_str() {
         "provision" => register(),
         "serve" => serve(),
+        "install-serve" => workspace::serve_install(),
         "enable" => {
             let password = bounded(io::stdin())?;
             println!(

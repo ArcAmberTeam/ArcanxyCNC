@@ -137,6 +137,12 @@ def main():
         words = []
     if not words:
         words = ["help"]
+    if words[0] in ("git", "build-deb", "install-deb", "build-status"):
+        os.execve(
+            "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account",
+            ["cnc-maint-account", "workspace", *words],
+            {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+        )
     if tuple(words) in PA_COMMANDS:
         # PA verifies the actual OS account again. Inherit the SSH streams for
         # its session; never buffer it through the one-shot diagnostics runner.
@@ -149,7 +155,7 @@ def main():
         print(
             json.dumps(
                 {
-                    "error": "Only read-only maintenance commands are permitted",
+                    "error": "Only fixed maintenance commands are permitted",
                     "allowed": ALLOWED,
                 }
             )
@@ -160,6 +166,8 @@ def main():
         payload = {
             "commands": ALLOWED,
             "managementCommands": [" ".join(words) for words in PA_COMMANDS],
+            "buildCommands": ["git clone", "git pull", "build-deb", "build-status", "install-deb FILE"],
+            "buildDirectory": "/var/lib/betterlinuxcnc/build",
             "shell": False,
             "upload": False,
             "forwarding": False,

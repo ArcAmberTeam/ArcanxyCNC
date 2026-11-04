@@ -152,7 +152,7 @@ pub(super) fn fetch(store: &Store, current_version: &str) -> Result<()> {
         .strip_prefix('v')
         .unwrap_or(&release.tag_name);
     storage::validate_version(tag_version)?;
-    if !storage::newer(tag_version, &installed)? {
+    if !betterlinuxcnc_local_update::accepts_official(tag_version, &installed)? {
         return store.publish(&Event::new("current", "已是最新版本", &installed, 100));
     }
     let asset = select_package(&release, &architecture)?;
@@ -236,7 +236,7 @@ pub(super) fn fetch(store: &Store, current_version: &str) -> Result<()> {
     if package_arch != architecture || version != tag_version {
         return Err("安装包的版本或架构与 Release 不符".into());
     }
-    if !storage::newer(&version, &installed)? {
+    if !betterlinuxcnc_local_update::accepts_official(&version, &installed)? {
         return Err("拒绝安装相同或更低版本".into());
     }
     file.as_file().sync_all()?;

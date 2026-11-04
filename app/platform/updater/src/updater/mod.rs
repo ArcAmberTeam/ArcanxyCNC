@@ -38,6 +38,9 @@ enum Action {
     Install,
     #[command(hide = true)]
     ApplySystem,
+    /// Authenticated maintenance stream; package policy lives in local-update.
+    #[command(hide = true)]
+    MaintenanceInstall,
     /// Fixed root-only guard for the independent Mesa flashing process.
     #[command(hide = true)]
     MesaMaintenance,
@@ -58,6 +61,8 @@ struct Event {
     version: String,
     #[serde(default)]
     progress: u8,
+    #[serde(default)]
+    self_compiled: bool,
 }
 
 impl Event {
@@ -67,10 +72,15 @@ impl Event {
             message: message.into(),
             version: version.into(),
             progress,
+            self_compiled: false,
         }
     }
     fn emit(&self) -> Result<()> {
-        println!("{}", serde_json::to_string(self)?);
+        let mut visible = self.clone();
+        visible.self_compiled = betterlinuxcnc_local_update::installed_version()
+            .and_then(|version| betterlinuxcnc_local_update::is_self_compiled(&version))
+            .unwrap_or(false);
+        println!("{}", serde_json::to_string(&visible)?);
         std::io::stdout().flush()?;
         Ok(())
     }
@@ -80,6 +90,9 @@ pub(super) fn run() -> Result<()> {
     let options = Options::parse();
     if matches!(options.command, Action::ApplySystem) {
         return broker::apply();
+    }
+    if matches!(options.command, Action::MaintenanceInstall) {
+        return maintenance::install_local();
     }
     if matches!(options.command, Action::MesaMaintenance) {
         return maintenance::run();
@@ -115,6 +128,7 @@ pub(super) fn run() -> Result<()> {
             broker::schedule(&store)
         }
         Action::ApplySystem => unreachable!(),
+        Action::MaintenanceInstall => unreachable!(),
         Action::MesaMaintenance => unreachable!(),
         Action::AxisMaintenance { .. } => unreachable!(),
         Action::Status => unreachable!(),

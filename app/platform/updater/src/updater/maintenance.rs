@@ -82,6 +82,59 @@ pub(super) fn run_axes(axes: u8) -> Result<()> {
 // END: AxisProfileMaintenance
 //--------//
 
+//--------//
+// BEGIN: LocalPackageMaintenance
+pub(super) fn install_local() -> Result<()> {
+    if !cfg!(target_os = "linux")
+        || unsafe { libc::getuid() } != 0
+        || unsafe { libc::geteuid() } != 0
+    {
+        return Err("Local package maintenance requires the fixed root service".into());
+    }
+    let store = broker::root_store()?;
+    let _lock = store.lock()?;
+    let (manager, socket, uid) = broker::machine_context()?;
+    install::preflight(&socket, &manager, uid)?;
+    let prepared = betterlinuxcnc_local_update::PreparedLocalPackage::receive(
+        std::io::stdin(),
+        &store.directory,
+    )?;
+    super::package::validate(prepared.path())?;
+    let version = prepared.version().to_owned();
+    let original = install::preflight(&socket, &manager, uid)?;
+    let launcher = PausedLauncher::stop(manager, original)?;
+    let result = (|| -> Result<()> {
+        if install::present(&socket)? || install::present(Path::new("/tmp/linuxcnc.lock"))? {
+            return Err("Control has not stopped; local installation refused".into());
+        }
+        if !super::command("/usr/sbin/betterlinuxcnc-appliance")
+            .arg("backup")
+            .stdin(Stdio::null())
+            .status()?
+            .success()
+        {
+            return Err("Backup failed; local package was not installed".into());
+        }
+        if install::present(&socket)? || install::present(Path::new("/tmp/linuxcnc.lock"))? {
+            return Err("Control returned after backup; local installation refused".into());
+        }
+        prepared.install_after_backup()
+    })();
+    if let Err(error) = result {
+        launcher.retain_stop_mask();
+        return Err(error);
+    }
+    launcher.resume()?;
+    store.publish(&Event::new(
+        "complete",
+        "自编译包已安装，版本号保持不变",
+        &version,
+        100,
+    ))
+}
+// END: LocalPackageMaintenance
+//--------//
+
 pub(super) fn run() -> Result<()> {
     if !cfg!(target_os = "linux")
         || unsafe { libc::getuid() } != 0

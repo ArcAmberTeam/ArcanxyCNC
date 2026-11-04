@@ -18,7 +18,7 @@ curl --fail --silent --show-error --location --retry 3 \
   https://sh.rustup.rs --output /tmp/rustup-init.sh
 sh /tmp/rustup-init.sh -y --no-modify-path --default-toolchain none
 export PATH="/root/.cargo/bin:$PATH"
-for module in app/platform/cam-link app/platform/updater app/platform/mesa-update app/platform/manage-ini app/platform/account-management/cnc-maint; do
+for module in app/platform/cam-link app/platform/updater app/platform/mesa-update app/platform/manage-ini app/platform/account-management/cnc-maint app/platform/package-build app/platform/local-update; do
   version=$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["toolchain"]["channel"])' "$module/rust-toolchain.toml")
   rustup toolchain install "$version" --profile minimal --component rustfmt --component clippy
 done
