@@ -177,7 +177,7 @@ jobs:
         run: python -m pip install -r app/controller/requirements-ci.txt
       - name: Install Rust for the staged system-service installation
         run: |
-          for module in app/platform/cam-link app/platform/updater app/platform/mesa-update app/platform/manage-ini; do
+          for module in app/platform/cam-link app/platform/updater app/platform/mesa-update app/platform/manage-ini app/platform/account-management/cnc-maint; do
             version=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["toolchain"]["channel"])' "$module/rust-toolchain.toml")
             # Both crate manifests request these components; preinstall them before parallel builds.
             rustup toolchain install "$version" --profile minimal --component rustfmt --component clippy
@@ -245,6 +245,8 @@ jobs:
             name: Mesa firmware checks and flash safeguards
           - module: app/platform/manage-ini
             name: PA maintenance terminal
+          - module: app/platform/account-management/cnc-maint
+            name: Maintenance account management
     defaults:
       run:
         working-directory: ${{ matrix.module }}
@@ -268,6 +270,11 @@ jobs:
           cargo check --locked --all-targets
           cargo clippy --locked --all-targets -- -D warnings
           SERVICE_TEST_PYTHON=python3 cargo test --locked
+      - name: Verify the actual maintenance account systemd service
+        if: matrix.module == 'app/platform/account-management/cnc-maint'
+        run: |
+          cargo build --locked
+          sudo env GITHUB_ACTIONS=true python3 "$GITHUB_WORKSPACE/.github/ci/account-service-check.py" "$PWD/target/debug/cnc-maint-account"
       - name: Verify PA terminal input through a real pseudoterminal
         if: matrix.module == 'app/platform/manage-ini'
         run: |

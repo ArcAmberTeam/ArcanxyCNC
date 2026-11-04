@@ -1,0 +1,11 @@
+[package]
+name = "betterlinuxcnc-cnc-maint"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.97"
+license = "GPL-2.0-or-later"
+description = "Fixed maintenance account management over authenticated local sockets"
+
+[[bin]]
+name = "cnc-maint-account"
+path = "src/main.rs"

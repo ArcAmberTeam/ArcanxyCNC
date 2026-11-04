@@ -26,6 +26,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QGuiApplication
 
 from ._axis_profiles import AxisProfiles
+from ._maintenance_account import MaintenanceAccount
 from ._mesa_update import MesaFlash, MesaUpdate
 from ._program import ProgramModel
 from ._program_files import ProgramFiles
@@ -69,6 +70,7 @@ class DesktopBackend(QObject):
         mesa_update_command=None,
         mesa_flash_command=None,
         axis_profile_command=None,
+        maintenance_account_command=None,
     ):
         super().__init__(parent)
         self._snapshot = {
@@ -90,6 +92,7 @@ class DesktopBackend(QObject):
         self._mesa_update = MesaUpdate(self, command=mesa_update_command)
         self._mesa_flash = MesaFlash(self, command=mesa_flash_command)
         self._axis_profiles = AxisProfiles(self, command=axis_profile_command)
+        self._maintenance_account = MaintenanceAccount(self, command=maintenance_account_command)
         self._settings = settings if settings is not None else QSettings()
         self._history = self._settings.value("mdi/history", [], type=list) or []
         self._recent = self._settings.value("program/recent", [], type=list) or []
@@ -134,6 +137,7 @@ class DesktopBackend(QObject):
     mesaUpdate = Property(QObject, lambda self: self._mesa_update, constant=True)
     mesaFlash = Property(QObject, lambda self: self._mesa_flash, constant=True)
     axisProfiles = Property(QObject, lambda self: self._axis_profiles, constant=True)
+    maintenanceAccount = Property(QObject, lambda self: self._maintenance_account, constant=True)
     history = Property("QStringList", lambda self: self._history, notify=historyChanged)
     recentFiles = Property("QStringList", lambda self: self._recent, notify=recentFilesChanged)
     toolTable = Property("QVariantList", lambda self: self._tool_rows, notify=toolTableChanged)
@@ -539,6 +543,7 @@ class DesktopBackend(QObject):
         self._mesa_update.close()
         self._mesa_flash.close()
         self._axis_profiles.close()
+        self._maintenance_account.close()
         self._heartbeat.stop()
         self._program.cancel()
         self.shutdownRequested.emit()

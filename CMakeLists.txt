@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(BetterLinuxCNC VERSION 26.11.04.3 LANGUAGES CXX)
+project(BetterLinuxCNC VERSION 26.11.04.4 LANGUAGES CXX)
 
 # Application composition only; the native LinuxCNC core is built from src/Makefile.
 include(cmake/ApplicationInstall.cmake)
@@ -26,6 +26,7 @@ if(BETTERCNC_BUILD_SYSTEM_SERVICES)
     add_subdirectory(app/platform/updater)
     add_subdirectory(app/platform/mesa-update)
     add_subdirectory(app/platform/manage-ini)
+    add_subdirectory(app/platform/account-management/cnc-maint)
 endif()
 add_subdirectory(app/desktop)
 add_subdirectory(tools/appliance)

@@ -21,6 +21,36 @@ APP = QGuiApplication.instance() or QGuiApplication([])
 
 
 class DesktopTests(unittest.TestCase):
+    def test_account_password_uses_stdin_and_waits_for_confirmed_reply(self):
+        self.backend.close()
+        root = Path(self.temporary.name)
+        script = root / "account-cli.py"
+        script.write_text(
+            "import json, sys\n"
+            "assert sys.argv[1] == 'request'\n"
+            "assert len(sys.argv) == 3\n"
+            "password = sys.stdin.read()\n"
+            "assert password == ('test password 123' if sys.argv[2] == 'enable' else '')\n"
+            "print(json.dumps(dict(ok=True, enabled=sys.argv[2] == 'enable')))\n"
+        )
+        self.backend = DesktopBackend(
+            socket_path=self.peer.path,
+            maintenance_account_command=[sys.executable, str(script)],
+        )
+        self.addCleanup(self.backend.close)
+        adapter = self.backend.maintenanceAccount
+        self.wait(lambda: adapter.known and not adapter.busy)
+        self.assertFalse(adapter.enabled)
+        self.assertFalse(adapter.setPassword("short"))
+        self.assertTrue(adapter.setPassword("test password 123"))
+        self.assertFalse(adapter.enabled)
+        self.wait(lambda: not adapter.busy)
+        self.assertTrue(adapter.enabled)
+        self.assertTrue(adapter.disable())
+        self.wait(lambda: not adapter.busy)
+        self.assertFalse(adapter.enabled)
+        self.assertFalse(self.actions())
+
     def axis_profile_peer(self, record):
         self.backend.close()
         root = Path(self.temporary.name)
