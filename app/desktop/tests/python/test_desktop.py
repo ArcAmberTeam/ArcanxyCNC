@@ -11,10 +11,11 @@ import unittest
 from pathlib import Path
 
 from bettercnc.desktop import DesktopBackend
-from PySide6.QtCore import QCoreApplication, QObject, QSettings, Qt, QUrl
+from PySide6.QtCore import QCoreApplication, QObject, QPointF, QSettings, Qt, QUrl
 from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtTest import QTest
+from PySide6.QtQuick import QQuickItem
+from PySide6.QtTest import QSignalSpy, QTest
 from test_session import Peer
 
 APP = QGuiApplication.instance() or QGuiApplication([])
@@ -537,6 +538,90 @@ else:
                 )
             ]
             self.assertEqual(problems, [])
+        finally:
+            for window in engine.rootObjects():
+                window.setProperty("visible", False)
+            engine.deleteLater()
+            QCoreApplication.sendPostedEvents()
+
+    def test_real_qobject_rotary_joint_jog_respects_angular_speed_limits(self):
+        errors = []
+        self.backend.errorOccurred.connect(errors.append)
+        heartbeat = QSignalSpy(self.backend.heartbeatRequested)
+        self.state.update(
+            axes=list("XYZAC"),
+            joints=list(range(5)),
+            jointCount=5,
+            motionMode="joint",
+            jointMap={axis: [joint] for joint, axis in enumerate("XYZAC")},
+            axisLimits={"A": {"maxVelocity": 5}, "C": {"maxVelocity": 1}},
+            jogMaxVelocity=25,
+        )
+        self.wait(lambda: self.backend.snapshot.get("jointCount") == 5)
+        qml = Path(__file__).resolve().parents[2] / "qml"
+        engine = QQmlApplicationEngine()
+        engine.addImportPath(str(qml))
+        engine.setInitialProperties({"backend": self.backend, "width": 1100, "height": 820})
+        engine.load(QUrl.fromLocalFile(str(qml / "Main.qml")))
+        try:
+            self.assertTrue(engine.rootObjects())
+            window = engine.rootObjects()[0]
+            self.assertTrue(QTest.qWaitForWindowExposed(window))
+
+            def item(name):
+                pending: list[QQuickItem] = [window.contentItem()]
+                while pending:
+                    control = pending.pop()
+                    if control.objectName() == name:
+                        return control
+                    pending.extend(control.childItems())
+                self.fail(f"Missing visible-tree control: {name}")
+
+            def point(name):
+                control = item(name)
+                self.assertTrue(control.isVisible(), name)
+                return control.mapToScene(
+                    QPointF(control.width() / 2, control.height() / 2)
+                ).toPoint()
+
+            def click(name):
+                QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point(name))
+                QTest.qWait(50)
+
+            def jog_requests():
+                return [
+                    request["params"]["payload"]
+                    for request in self.peer.requests
+                    if request["method"] == "command.execute"
+                    and request["params"]["action"] == "jog.start"
+                ]
+
+            click("workspace-page-control")
+            self.wait(lambda: item("manualPanel").isVisible())
+            for joint, speed in ((3, 5), (4, 1)):
+                with self.subTest(joint=joint):
+                    click(f"joint{joint}")
+                    self.wait(lambda: item("jogVelocity").property("unit") == "度/分钟")
+                    self.assertEqual(item("jogVelocity").property("to"), speed * 60)
+                    before = len(jog_requests())
+                    position = point("jogPlus")
+                    # Let the real GUI timer and worker run between scripted gestures.
+                    pulse = heartbeat.count()
+                    self.wait(lambda pulse=pulse: heartbeat.count() > pulse)
+                    time.sleep(0.02)
+                    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, position)
+                    try:
+                        self.wait(lambda before=before: len(jog_requests()) > before or errors)
+                        self.assertEqual(errors, [])
+                        payload = jog_requests()[-1]
+                        self.assertEqual(payload["axis"], joint)
+                        self.assertEqual(payload["mode"], "joint")
+                        self.assertEqual(payload["velocity"], speed)
+                    finally:
+                        QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, position)
+                        QTest.qWait(50)
+            click("joint0")
+            self.wait(lambda: item("jogVelocity").property("unit") == "毫米/分钟")
         finally:
             for window in engine.rootObjects():
                 window.setProperty("visible", False)

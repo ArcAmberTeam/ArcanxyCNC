@@ -24,15 +24,16 @@ Rectangle {
         && machine.mode === "manual" && machine.motionMode === presentation.mode
     readonly property bool canOperate: connected && !!machine.powered && !machine.estop && !machine.busy
     readonly property string axesKey: (machine.axes || []).join(",")
-    readonly property string jointsKey: (Array.isArray(machine.joints) ? machine.joints
-        : Array.from({length: Number(machine.jointCount || 0)}, (_, index) => index)).join(",")
+    readonly property string jointsKey: (machine.joints
+        || Array.from({length: Number(machine.jointCount || 0)}, (_, index) => index)).join(",")
     readonly property var axes: axesKey ? axesKey.split(",") : []
     readonly property var joints: jointsKey ? jointsKey.split(",").map(Number) : []
     readonly property var selectionValues: presentation.mode === "joint" ? joints : axes
     readonly property string jogAxis: {
         if (presentation.mode !== "joint") return presentation.selectedAxis;
         const mapping = machine.jointMap || {};
-        const matches = Object.keys(mapping).filter(axis => Array.isArray(mapping[axis])
+        // QVariantList arrives as a Qt sequence, for which Array.isArray is false.
+        const matches = Object.keys(mapping).filter(axis => mapping[axis]
             && mapping[axis].length === 1 && mapping[axis][0] === presentation.selectedJoint);
         return matches.length === 1 ? matches[0] : "";
     }
