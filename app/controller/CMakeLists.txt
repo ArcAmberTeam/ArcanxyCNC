@@ -18,4 +18,6 @@ if(BUILD_TESTING)
         -s "${CMAKE_CURRENT_SOURCE_DIR}/tests" -v)
     set_tests_properties(backend-integration PROPERTIES ENVIRONMENT
         "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src")
+    set_property(TEST backend-integration APPEND PROPERTY ENVIRONMENT_MODIFICATION
+        "PYTHONPATH=path_list_prepend:${CMAKE_CURRENT_SOURCE_DIR}/../platform/error-records/python/src")
 endif()
