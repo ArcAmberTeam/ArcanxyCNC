@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "betterlinuxcnc-qt"
-version = "26.11.04.4"
+version = "26.11.04.5"
 description = "QML desktop with a private Unix socket connection to LinuxCNC"
 requires-python = ">=3.11"
 license = "GPL-2.0-or-later"
