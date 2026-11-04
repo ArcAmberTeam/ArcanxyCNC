@@ -15,7 +15,7 @@ from PySide6.QtCore import QCoreApplication, QObject, QPointF, QSettings, Qt, QU
 from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from test_session import Peer
 
 APP = QGuiApplication.instance() or QGuiApplication([])
@@ -547,6 +547,7 @@ else:
     def test_real_qobject_rotary_joint_jog_respects_angular_speed_limits(self):
         errors = []
         self.backend.errorOccurred.connect(errors.append)
+        heartbeat = QSignalSpy(self.backend.heartbeatRequested)
         self.state.update(
             axes=list("XYZAC"),
             joints=list(range(5)),
@@ -604,6 +605,10 @@ else:
                     self.assertEqual(item("jogVelocity").property("to"), speed * 60)
                     before = len(jog_requests())
                     position = point("jogPlus")
+                    # Let the real GUI timer and worker run between scripted gestures.
+                    pulse = heartbeat.count()
+                    self.wait(lambda pulse=pulse: heartbeat.count() > pulse)
+                    time.sleep(0.02)
                     QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, position)
                     try:
                         self.wait(lambda before=before: len(jog_requests()) > before or errors)
