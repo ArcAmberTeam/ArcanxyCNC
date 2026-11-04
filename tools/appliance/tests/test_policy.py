@@ -93,6 +93,7 @@ class PolicyTests(unittest.TestCase):
             ssh = root / "etc/ssh/sshd_config"
             sudo = root / "etc/sudoers"
             current_ssh, current_sudo = ssh.read_text(), sudo.read_text()
+            sudo.chmod(0o600)
             legacy_ssh = current_ssh.replace("PermitTTY yes", "PermitTTY no")
             legacy_sudo = "\n".join(
                 line for line in current_sudo.split("\n") if "pa-config" not in line
