@@ -118,16 +118,26 @@ pub(crate) fn run() -> Result<()> {
     let unit = "betterlinuxcnc-error-records.service";
     let bytes = fs::read(format!("{BASE}/{unit}"))?;
     let destination = Path::new("/usr/lib/systemd/system").join(unit);
+    let ledger = Path::new("/etc/betterlinuxcnc/error-records/service.unit");
     if destination.exists() && fs::read(&destination)? != bytes {
-        return Err("Error service has local edits".into());
+        let info = fs::symlink_metadata(ledger)?;
+        if !info.is_file()
+            || info.uid() != 0
+            || info.mode() & 0o022 != 0
+            || fs::read(ledger)? != fs::read(&destination)?
+        {
+            return Err("Error service has local edits".into());
+        }
     }
     crate::export::atomic(&destination, &bytes)?;
     fs::set_permissions(destination, fs::Permissions::from_mode(0o644))?;
+    crate::export::atomic(ledger, &bytes)?;
+    fs::set_permissions(ledger, fs::Permissions::from_mode(0o644))?;
     fixed("/usr/bin/systemctl", &["enable", unit])?;
     if Path::new("/run/systemd/system").is_dir() {
         fixed("/usr/bin/systemctl", &["daemon-reload"])?;
         // Explicitly requested diagnostics activation; this service has no CNC control API.
-        fixed("/usr/bin/systemctl", &["start", "--no-block", unit])?;
+        fixed("/usr/bin/systemctl", &["restart", "--no-block", unit])?;
     }
     Ok(())
 }

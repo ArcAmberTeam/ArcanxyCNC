@@ -75,11 +75,16 @@ fn receive(_: &UnixDatagram) -> Result<(Vec<u8>, u32, i32)> {
     Err("Linux credentials required".into())
 }
 
-fn process_pending() -> Result<()> {
+fn process_pending(cursor: &mut String) -> Result<()> {
     let mut connection = database::connect().ok();
     let pending = Path::new(STATE).join("pending");
-    for entry in fs::read_dir(pending)?.take(256) {
-        let entry = entry?;
+    let mut entries = fs::read_dir(pending)?.collect::<std::io::Result<Vec<_>>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    let split = entries
+        .partition_point(|entry| entry.file_name().to_string_lossy().as_ref() <= cursor.as_str());
+    let entries = entries[split..].iter().chain(entries[..split].iter());
+    for entry in entries.take(256) {
+        *cursor = entry.file_name().to_string_lossy().into_owned();
         if !entry.file_type()?.is_file()
             || entry.path().extension().and_then(|x| x.to_str()) != Some("json")
         {
@@ -140,7 +145,7 @@ fn query_server(listener: UnixListener, health: Arc<Health>) {
                     "exports":EXPORT}),
                 );
             }
-            database::query(filter)
+            database::query(filter).or_else(|_| export::query(Path::new(EXPORT), filter))
         })();
         let reply = match reply {
             Ok(value) => value,
@@ -165,6 +170,24 @@ pub(crate) fn query(args: &[String]) -> Result<()> {
         return Err("Unknown error category or event ID".into());
     }
     let mut socket = UnixStream::connect(format!("{RUNTIME}/query.sock"))?;
+    #[cfg(target_os = "linux")]
+    {
+        let mut peer: libc::ucred = unsafe { std::mem::zeroed() };
+        let mut length = std::mem::size_of_val(&peer) as libc::socklen_t;
+        if unsafe {
+            libc::getsockopt(
+                socket.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&mut peer as *mut libc::ucred).cast(),
+                &mut length,
+            )
+        } != 0
+            || peer.uid != provision::uid("cnc-errors")?
+        {
+            return Err("Untrusted error-query service".into());
+        }
+    }
     socket.set_read_timeout(Some(Duration::from_secs(10)))?;
     socket.set_write_timeout(Some(Duration::from_secs(2)))?;
     socket.write_all(filter.as_bytes())?;
@@ -223,29 +246,38 @@ pub(crate) fn run() -> Result<()> {
     let database_health = Arc::clone(&health);
     std::thread::spawn(move || {
         let mut child: Option<std::process::Child> = None;
-        let mut ticks = 0;
+        let mut ticks: u64 = 0;
+        let mut cursor = String::new();
+        let mut last_error = String::new();
         loop {
             let running = child
                 .as_mut()
                 .is_some_and(|c| c.try_wait().ok() == Some(None));
+            let mut startup_error = None;
             if !running {
                 match database::start() {
                     Ok(process) => child = Some(process),
                     Err(error) => {
-                        if let Ok(mut state) = database_health.database.lock() {
-                            *state = crate::event::redact(&error.to_string());
-                        }
+                        startup_error = Some(crate::event::redact(&error.to_string()));
                     }
                 }
             }
-            let result = process_pending();
-            if let Ok(mut state) = database_health.database.lock() {
-                *state = result
+            let result = process_pending(&mut cursor);
+            let message = startup_error.unwrap_or_else(|| {
+                result
                     .map(|_| "ready".to_string())
-                    .unwrap_or_else(|error| crate::event::redact(&error.to_string()));
+                    .unwrap_or_else(|error| crate::event::redact(&error.to_string()))
+            });
+            if message != "ready" && message != last_error {
+                eprintln!("Error storage: {message}");
+                betterlinuxcnc_error_client::report("error-records", "storage_error", &message);
+            }
+            last_error.clone_from(&message);
+            if let Ok(mut state) = database_health.database.lock() {
+                *state = message;
             }
             ticks += 1;
-            if ticks % 60 == 0 {
+            if ticks.is_multiple_of(60) {
                 let _ = export::retain(Path::new(EXPORT));
             }
             std::thread::sleep(Duration::from_secs(1));

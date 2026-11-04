@@ -6,7 +6,7 @@ import socket
 import sys
 import threading
 
-__all__ = ["report", "install_exception_hooks"]
+__all__ = ["install_exception_hooks", "report"]
 _SOCKET = "/run/betterlinuxcnc-error-records/events.sock"
 
 

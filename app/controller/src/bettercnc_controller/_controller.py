@@ -382,6 +382,7 @@ class Controller:
             "max-velocity": "velocity.max",
         }
         action = aliases.get(action, action)
+        previous_error_context = self._error_context
         self._error_context = {
             "action": action,
             **{
@@ -423,6 +424,7 @@ class Controller:
             # Rejection cannot silently discard a previously accepted command.
             if self._steps:
                 report("controller", "command_rejected", str(error), self._error_context)
+                self._error_context = previous_error_context
                 self._errors.append({"kind": 0, "error": True, "message": str(error)})
                 self._publish()
             else:

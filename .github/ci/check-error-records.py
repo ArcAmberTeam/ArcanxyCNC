@@ -208,6 +208,24 @@ assert not vendor.calls
                 "Real MySQL persistence, Controller errors, exports, credential boundaries and outage replay passed"
             )
         except Exception:
+            diagnostics = subprocess.run(
+                [str(BINARY), "query", "status"],
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+            print(diagnostics.stdout + diagnostics.stderr, file=sys.stderr)
+            for path in (
+                STATE,
+                Path("/var/lib/mysql"),
+                Path("/var/lib/mysql/betterlinuxcnc-errors"),
+                BASE / "mysql/usr/sbin/mysqld",
+            ):
+                print(
+                    str(path),
+                    path.stat() if path.exists() else "missing",
+                    file=sys.stderr,
+                )
             output.seek(0)
             print(output.read()[-12000:], file=sys.stderr)
             raise

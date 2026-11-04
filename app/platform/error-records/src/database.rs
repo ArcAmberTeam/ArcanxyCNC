@@ -2,7 +2,7 @@ use crate::{event::Event, Result};
 use mysql::{prelude::Queryable, Conn, OptsBuilder};
 use std::{
     fs,
-    io::Write,
+    io::{BufRead, BufReader, Write},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::Path,
     process::{Child, Command, Stdio},
@@ -78,7 +78,20 @@ pub(crate) fn start() -> Result<Child> {
             return Err("Private MySQL initialization failed".into());
         }
     }
-    let mut child = server().spawn()?;
+    let mut child = server().stderr(Stdio::piped()).spawn()?;
+    if let Some(stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr)
+                .lines()
+                .map_while(std::result::Result::ok)
+            {
+                if line.contains("[ERROR]") {
+                    betterlinuxcnc_error_client::report("error-records", "database_error", &line);
+                }
+                eprintln!("{}", crate::event::redact(&line));
+            }
+        });
+    }
     let initialized = (|| -> Result<()> {
         let password = fs::read_to_string(password_path)?;
         if password.len() != 64 || !password.bytes().all(|b| b.is_ascii_hexdigit()) {

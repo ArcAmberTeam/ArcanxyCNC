@@ -44,6 +44,10 @@ pub(crate) fn redact(text: &str) -> String {
     let bounded = BEARER
         .get_or_init(|| Regex::new(r#"(?i)bearer\s+[^\s,;"']+"#).expect("constant bearer pattern"))
         .replace_all(&bounded, "Bearer [REDACTED]");
+    static QUOTED: OnceLock<Regex> = OnceLock::new();
+    let bounded = QUOTED.get_or_init(|| Regex::new(
+        r#"(?i)(password|passwd|token|authorization|secret|api[_-]?key)["']?\s*[:=]\s*("[^"\r\n]*"|'[^'\r\n]*')"#
+    ).expect("constant quoted credential pattern")).replace_all(&bounded, "$1=[REDACTED]");
     let text = pattern.replace_all(&bounded, "$1$2[REDACTED]");
     static URL: OnceLock<Regex> = OnceLock::new();
     URL.get_or_init(|| {
@@ -123,6 +127,14 @@ impl Event {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn redact_quoted_and_bearer_credentials() {
+        let value =
+            redact(r#"password="two words" token='other secret' Authorization: Bearer abc123"#);
+        for secret in ["two words", "other secret", "abc123"] {
+            assert!(!value.contains(secret));
+        }
+    }
     #[test]
     fn refused_jog_keeps_numeric_context_without_credentials() {
         let event = Event::receive(br#"{"schema_version":1,"source":"controller","code":"command_rejected","message":"velocity invalid parameter password=abc","context":{"velocity":12,"joint":4,"password":"do-not-store"}}"#, 123, 456).unwrap();

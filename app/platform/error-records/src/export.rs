@@ -107,3 +107,52 @@ pub(crate) fn retain(root: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+pub(crate) fn query(root: &Path, filter: &str) -> Result<serde_json::Value> {
+    if !filter.is_empty()
+        && !crate::categories::ALL.contains(&filter)
+        && uuid::Uuid::parse_str(filter).is_err()
+    {
+        return Err("Unknown error category or event ID".into());
+    }
+    let mut files = Vec::new();
+    for category in crate::categories::ALL {
+        if crate::categories::ALL.contains(&filter) && filter != *category {
+            continue;
+        }
+        for day in fs::read_dir(root.join(category))? {
+            let day = day?;
+            if !day.file_type()?.is_dir() {
+                continue;
+            }
+            for file in fs::read_dir(day.path())? {
+                let file = file?;
+                if file.file_type()?.is_file()
+                    && file.path().extension().is_some_and(|s| s == "jsonl")
+                {
+                    files.push((file.metadata()?.modified()?, file.path()));
+                }
+            }
+        }
+    }
+    files.sort();
+    let mut records = Vec::<Event>::new();
+    // Keep offline reads bounded even after long periods without MySQL.
+    for (_, path) in files.into_iter().rev().take(32) {
+        let bytes = fs::read(path)?;
+        for line in bytes.split(|b| *b == b'\n').filter(|line| !line.is_empty()) {
+            let event: Event = serde_json::from_slice(line)?;
+            if filter.is_empty() || filter == event.category || filter == event.event_id {
+                records.push(event);
+            }
+        }
+        if records.len() >= 100 {
+            break;
+        }
+    }
+    records.sort_by_key(|e| std::cmp::Reverse(e.received_ms));
+    records.truncate(100);
+    Ok(
+        serde_json::json!({"database":"unavailable","source":"exports","events":records,"limit":100,"bounded_files":32}),
+    )
+}
