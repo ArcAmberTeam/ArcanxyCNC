@@ -262,12 +262,26 @@ fn register() -> Result<()> {
         trusted_parent(&path)?;
         if path.try_exists()? {
             let info = fs::symlink_metadata(&path)?;
-            if !info.is_file()
-                || info.uid() != 0
-                || info.mode() & 0o022 != 0
-                || fs::read_to_string(&path)? != contents
-            {
+            if !info.is_file() || info.uid() != 0 || info.mode() & 0o022 != 0 {
                 return Err("Local service edits require review".into());
+            }
+            let current = fs::read_to_string(&path)?;
+            if current != contents {
+                let previous = contents.replace("AmbientCapabilities=CAP_SETUID CAP_SETGID\n", "");
+                if unit != workspace::UNIT || suffix != "@.service" || current != previous {
+                    return Err("Local service edits require review".into());
+                }
+                // Upgrade only the exact previously shipped local-install unit.
+                let temporary = path.with_extension(format!("upgrade-{}", std::process::id()));
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o644)
+                    .open(&temporary)?;
+                file.write_all(contents.as_bytes())?;
+                file.sync_all()?;
+                fs::rename(&temporary, &path)?;
+                File::open(path.parent().ok_or("Missing unit parent")?)?.sync_all()?;
             }
         } else {
             let mut file = OpenOptions::new()

@@ -12,7 +12,7 @@ use std::time::Duration;
 pub(super) const UNIT: &str = "betterlinuxcnc-cnc-maint-build";
 const ROOT: &str = "/var/lib/betterlinuxcnc/build";
 pub(super) const SOCKET_UNIT: &str = "[Unit]\nDescription=Maintenance local package requests\n[Socket]\nListenStream=/run/betterlinuxcnc-cnc-maint-build.sock\nSocketUser=cnc-maint\nSocketMode=0600\nAccept=yes\nMaxConnections=2\nRemoveOnStop=yes\n[Install]\nWantedBy=sockets.target\n";
-pub(super) const SERVICE_UNIT: &str = "[Unit]\nDescription=Guarded maintenance local package installation\n[Service]\nExecStart=/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account install-serve\nUser=root\nStandardInput=socket\nStandardOutput=null\nStandardError=journal\nTimeoutStartSec=infinity\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=no\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nLockPersonality=yes\nLimitCORE=0\n";
+pub(super) const SERVICE_UNIT: &str = "[Unit]\nDescription=Guarded maintenance local package installation\n[Service]\nExecStart=/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account install-serve\nUser=root\nStandardInput=socket\nStandardOutput=null\nStandardError=journal\nTimeoutStartSec=infinity\nUMask=0077\nNoNewPrivileges=yes\nAmbientCapabilities=CAP_SETUID CAP_SETGID\nPrivateTmp=no\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nLockPersonality=yes\nLimitCORE=0\n";
 
 unsafe extern "C" {
     fn getuid() -> u32;

@@ -234,6 +234,59 @@ class AxisUpgradeTests(unittest.TestCase):
             self.assertGreater(minimum, ini.getfloat(f"JOINT_{joint}", "HOME_OFFSET"))
             self.assertEqual(ini.getfloat(f"AXIS_{axis}", "MIN_LIMIT"), minimum)
 
+    def test_preserves_generated_axis_profiles_and_rejects_changed_evidence(self):
+        self.assertEqual(self.invoke().returncode, 0)
+        original = self.contents()
+        base = original["烛龙V2.ini"].decode()
+        script = """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from axis_configuration import generate, hal_files
+data = json.load(sys.stdin)
+base = data['烛龙V2.ini']
+names = hal_files(base)
+ini, hal = generate(base, {name: data[name] for name in names}, int(sys.argv[2]))
+print(json.dumps({'ini': ini, 'hal': hal, 'names': names}))
+"""
+        for count in (3, 4, 5):
+            with self.subTest(count=count):
+                generated = json.loads(
+                    subprocess.check_output(
+                        [sys.executable, "-I", "-c", script, str(MODULE), str(count)],
+                        input=json.dumps({k: v.decode() for k, v in original.items()}),
+                        text=True,
+                    )
+                )
+                files = dict(original)
+                files["烛龙V2.ini"] = generated["ini"].encode()
+                files.update({k: v.encode() for k, v in generated["hal"].items()})
+                files[".axis-settings-source.json"] = json.dumps(
+                    {
+                        "schema_version": 1,
+                        "ini": "烛龙V2.ini",
+                        "base_ini": base,
+                        "accepted_ini_hashes": [
+                            hashlib.sha256(files["烛龙V2.ini"]).hexdigest()
+                        ],
+                        "hal_hashes": {
+                            name: hashlib.sha256(original[name]).hexdigest()
+                            for name in generated["names"]
+                        },
+                    }
+                ).encode()
+                for path in self.machine.iterdir():
+                    path.unlink()
+                for name, data in files.items():
+                    (self.machine / name).write_bytes(data)
+                result = self.invoke()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("already-current", result.stdout)
+                self.assertEqual(self.contents(), files)
+                for name in ("烛龙V2.ini", "custom.hal", *generated["hal"]):
+                    (self.machine / name).write_bytes(files[name] + b"\n# changed\n")
+                    self.assertNotEqual(self.invoke().returncode, 0)
+                    (self.machine / name).write_bytes(files[name])
+
     def test_refuses_live_core_unknown_files_and_modified_source_without_partial_changes(
         self,
     ):

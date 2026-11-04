@@ -16,6 +16,7 @@ import stat
 import uuid
 
 import _homing
+from axis_profiles import migration_base
 
 V4_REVISION = "zhulong-xyz-20261026"
 REVISION = "zhulong-xyz-v5-20261026"
@@ -241,11 +242,14 @@ def _upgrade(root, config):
             return "not-applicable"
         if b"PROFILE = zhulong-v2" not in content:
             return "not-applicable"
-        if set(os.listdir(machine)) != set(ORIGINAL):
+        files = {name: _read(machine, name) for name in os.listdir(machine)}
+        manifest = json.loads(files[MANIFEST])
+        if manifest.get("configurationRevision") == REVISION:
+            files = migration_base(files, INI)
+        if set(files) != set(ORIGINAL):
             raise ValueError(
                 "Machine file set differs from the reviewed v1/v4 profiles"
             )
-        files = {name: _read(machine, name) for name in ORIGINAL}
     manifest = json.loads(files[MANIFEST])
     if manifest.get("configurationRevision") == REVISION:
         expected = manifest.get("configurationFiles")
