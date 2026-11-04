@@ -114,7 +114,9 @@ def verify_sudo_access(helper, password):
         return result
 
     try:
-        run("visudo", "-c")
+        # Validate our fixture and its include without imposing file-mode rules
+        # on the hosted runner's pre-existing administrator sudoers fragment.
+        run("visudo", "-c", "-f", str(fixture))
         sudo("-n", "/usr/bin/id", "-u", ok=False)
         sudo("-S", "-k", str(helper), "sudo-open", secret="incorrect-ci-password\n", ok=False)
         assert "NOPASSWD: ALL" not in policy.read_text()
