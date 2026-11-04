@@ -599,7 +599,7 @@ else:
                     position = point("jogPlus")
                     QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, position)
                     try:
-                        self.wait(lambda: len(jog_requests()) > before)
+                        self.wait(lambda before=before: len(jog_requests()) > before)
                         payload = jog_requests()[-1]
                         self.assertEqual(payload["axis"], joint)
                         self.assertEqual(payload["mode"], "joint")
