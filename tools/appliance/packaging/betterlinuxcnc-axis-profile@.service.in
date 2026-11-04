@@ -14,7 +14,8 @@ NoNewPrivileges=yes
 PrivateTmp=no
 PrivateDevices=yes
 ProtectSystem=strict
-ProtectHome=yes
+# Read the operator runtime directory and connect to its existing Unix sockets.
+ProtectHome=read-only
 ReadWritePaths=/etc/betterlinuxcnc /var/cache/betterlinuxcnc /var/lib/betterlinuxcnc
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
