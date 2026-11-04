@@ -10,7 +10,10 @@ import sys
 
 
 def run(*args, **kwargs):
-    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=30, **kwargs)
+    result = subprocess.run(args, check=False, capture_output=True, text=True, timeout=30, **kwargs)
+    if result.returncode:
+        raise RuntimeError(f"{args[0]} failed: {result.stderr}")
+    return result
 
 
 def main():
