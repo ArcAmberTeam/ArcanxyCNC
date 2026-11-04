@@ -1,6 +1,6 @@
 //! Source checkout and same-version application packaging, always as cnc-maint.
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -78,7 +78,27 @@ fn process(program: &str) -> Command {
     process
 }
 fn execute(process: &mut Command) -> Result<()> {
-    if !process.status()?.success() {
+    let mut child = process.stderr(Stdio::piped()).spawn()?;
+    let mut stderr = child.stderr.take().ok_or("Missing build stderr")?;
+    let mut tail = Vec::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        let size = stderr.read(&mut buffer)?;
+        if size == 0 {
+            break;
+        }
+        let _ = io::stderr().write_all(&buffer[..size]);
+        tail.extend_from_slice(&buffer[..size]);
+        if tail.len() > 8192 {
+            tail.drain(..tail.len() - 8192);
+        }
+    }
+    if !child.wait()?.success() {
+        betterlinuxcnc_error_client::report(
+            "package-build",
+            "build_command_failed",
+            &String::from_utf8_lossy(&tail),
+        );
         return Err("Command failed; see the output above".into());
     }
     Ok(())
@@ -138,6 +158,7 @@ fn build() -> Result<()> {
         "account-management/cnc-maint",
         "package-build",
         "local-update",
+        "error-records",
     ] {
         execute(
             process("/usr/bin/cargo")

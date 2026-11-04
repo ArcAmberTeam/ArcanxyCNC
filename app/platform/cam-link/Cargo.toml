@@ -11,6 +11,7 @@ name = "betterlinuxcnc-cam-link"
 path = "src/main.rs"
 
 [dependencies]
+betterlinuxcnc-error-client = { path = "../error-records/client" }
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"

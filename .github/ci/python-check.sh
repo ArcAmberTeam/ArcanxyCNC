@@ -37,11 +37,12 @@ case "$scope" in
     ;;
   *) echo "Unknown Python CI scope: $scope" >&2; exit 2 ;;
 esac
-"$python_bin" -m ruff check "${paths[@]}"
-"$python_bin" -m ruff format --check "${paths[@]}"
+"$python_bin" -m ruff check "${paths[@]}" app/platform/error-records/python app/platform/error-records/runtime
+"$python_bin" -m ruff format --check "${paths[@]}" app/platform/error-records/python app/platform/error-records/runtime
 "$python_bin" app/desktop/scripts/check_boundaries.py
 package_dist=$(mktemp -d)
 trap 'rm -rf "$package_dist"' EXIT
+"$python_bin" -m build --no-isolation --outdir "$package_dist" app/platform/error-records/python
 "$python_bin" -m build --no-isolation --outdir "$package_dist" "$package"
 "$python_bin" -m pip install --no-deps --force-reinstall "$package_dist"/*.whl
 for test_file in "${tests[@]}"; do

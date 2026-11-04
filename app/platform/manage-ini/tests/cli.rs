@@ -73,6 +73,9 @@ fn rejects_unknown_verbs_targets_paths_extra_arguments_and_shell_syntax() {
         vec!["manage", "ini;id"],
         vec!["manage", "$(id)"],
         vec!["execute", "ini"],
+        vec!["manage", "sudo"],
+        vec!["manage", "sudo", "open", "extra"],
+        vec!["manage", "sudo", "close"],
     ] {
         let result = invoke(&arguments, b"", Some("cnc-maint"));
         assert_eq!(result.status.code(), Some(64), "{:?}", result);
@@ -87,6 +90,7 @@ fn help_lists_registered_targets_and_session_does_not_execute_input() {
     let text = String::from_utf8(result.stdout).unwrap();
     assert!(text.contains("manage ini"));
     assert!(text.contains("manage launcher.json"));
+    assert!(text.contains("manage sudo open"));
     let result = invoke(&["manage", "ini"], b"id\nexit\n", Some("cnc-maint"));
     assert!(result.status.success());
     let text = String::from_utf8(result.stdout).unwrap();

@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from bettercnc_error_records import install_exception_hooks
 from PySide6.QtCore import QCoreApplication, Qt, QTimer, QUrl
 from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
@@ -15,6 +16,7 @@ from bettercnc import __version__
 
 
 def main(argv=None):
+    install_exception_hooks("desktop")
     parser = argparse.ArgumentParser(description="BetterLinuxCNC QML desktop")
     parser.add_argument("-ini", "--ini", dest="ini", help="Require the service to use this INI")
     parser.add_argument(

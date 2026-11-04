@@ -1,0 +1,32 @@
+[Unit]
+Description=Local MySQL error records and categorized diagnostic exports
+After=local-fs.target
+
+[Service]
+Type=simple
+User=cnc-errors
+Group=cnc-logs
+ExecStart=/usr/lib/betterlinuxcnc/error-records/betterlinuxcnc-error-records serve
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=betterlinuxcnc-error-records
+RuntimeDirectoryMode=0755
+UMask=0027
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/betterlinuxcnc/error-records /var/lib/mysql/betterlinuxcnc-errors /var/log/betterlinuxcnc/errors
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+LimitCORE=0
+MemoryMax=512M
+TasksMax=96
+TimeoutStopSec=60
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

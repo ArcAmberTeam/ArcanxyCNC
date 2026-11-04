@@ -65,6 +65,10 @@ if(BUILD_TESTING)
     set_tests_properties(guided-preview-startup PROPERTIES ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic"
         FAIL_REGULAR_EXPRESSION "QQmlApplicationEngine failed;ReferenceError:;TypeError:;Unable to assign;Binding loop detected")
+    set_property(TEST python-integration desktop-startup interactive-gui-startup
+        external-interface-integration visual-preview-startup guided-preview-startup
+        APPEND PROPERTY ENVIRONMENT_MODIFICATION
+        "PYTHONPATH=path_list_prepend:${CMAKE_CURRENT_SOURCE_DIR}/../platform/error-records/python/src")
 endif()
 
 install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/betterlinuxcnc" DESTINATION ${CMAKE_INSTALL_BINDIR})

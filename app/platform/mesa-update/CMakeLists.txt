@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
+file(GLOB_RECURSE error_record_client_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../error-records/client/src/*.rs")
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(BetterLinuxCNCMesaUpdate LANGUAGES NONE)
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/ApplicationInstall.cmake")
@@ -22,7 +23,7 @@ else()
         COMMAND "${CMAKE_COMMAND}" -E env "CARGO_TARGET_DIR=${mesa_target}"
             "${CARGO_EXECUTABLE}" build --release --locked --bins
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        DEPENDS ${mesa_sources} Cargo.toml Cargo.lock rust-toolchain.toml
+        DEPENDS ${error_record_client_sources} ${mesa_sources} Cargo.toml Cargo.lock rust-toolchain.toml
         VERBATIM)
     add_custom_target(betterlinuxcnc-mesa-services ALL DEPENDS "${mesa_update_binary}" "${mesa_flash_binary}")
 endif()

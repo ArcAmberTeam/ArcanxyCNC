@@ -9,3 +9,6 @@ description = "Fixed maintenance account management over authenticated local soc
 [[bin]]
 name = "cnc-maint-account"
 path = "src/main.rs"
+
+[dependencies]
+betterlinuxcnc-error-client = { path = "../../error-records/client" }

@@ -36,7 +36,7 @@ class ApplianceTests(unittest.TestCase):
             requests = (
                 f"logs; touch {marker}",
                 "sh",
-                "sudo -l",
+                "pa manage sudo open extra",
                 "internal-sftp",
                 "scp -t /tmp/file",
                 "logs /etc/shadow",

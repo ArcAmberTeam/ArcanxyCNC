@@ -96,7 +96,9 @@ class PolicyTests(unittest.TestCase):
             sudo.chmod(0o600)
             legacy_ssh = current_ssh.replace("PermitTTY yes", "PermitTTY no")
             legacy_sudo = "\n".join(
-                line for line in current_sudo.split("\n") if "pa-config" not in line
+                line
+                for line in current_sudo.replace(policy.SUDO_ACCESS, "").split("\n")
+                if "pa-config" not in line
             )
             ssh.write_text(legacy_ssh)
             sudo.write_text(legacy_sudo + "# onsite customization\n")

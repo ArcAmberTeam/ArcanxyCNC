@@ -12,6 +12,7 @@ from pathlib import Path
 
 # -I rejects caller-controlled Python paths; only installed sibling modules load.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, "/usr/lib/betterlinuxcnc/python")
 import _accounts
 import _axis_upgrade
 import _backup
@@ -19,6 +20,7 @@ import _homing
 import _machine
 import _policy
 import axis_profiles
+from bettercnc_error_records import report
 
 
 def main():
@@ -136,12 +138,17 @@ def main():
     if args.action == "provision":
         _accounts.provision()
         axis_profiles.install_integration()
-        print("Maintenance policy: " + _policy.upgrade_maintenance())
         account_manager = Path(
             "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account"
         )
         if account_manager.is_file():
             _accounts.run(str(account_manager), "provision")
+        print("Maintenance policy: " + _policy.upgrade_maintenance())
+        error_records = Path(
+            "/usr/lib/betterlinuxcnc/error-records/betterlinuxcnc-error-records"
+        )
+        if error_records.is_file():
+            _accounts.run(str(error_records), "provision")
         print("Machine axis migration: " + _axis_upgrade.upgrade())
         if Path("/run/systemd/system").is_dir():
             _accounts.run("/usr/bin/systemctl", "daemon-reload")
@@ -206,5 +213,6 @@ if __name__ == "__main__":
         configparser.Error,
         subprocess.SubprocessError,
     ) as error:
+        report("configuration", "appliance_error", str(error))
         print(f"Appliance provisioning refused: {error}", file=sys.stderr)
         raise SystemExit(1) from None

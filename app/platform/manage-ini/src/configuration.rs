@@ -131,13 +131,20 @@ pub(crate) fn serve() -> u8 {
             },
             0,
         ),
-        Err(error) => (
-            Response {
-                document: None,
-                error: Some(error.to_string()),
-            },
-            1,
-        ),
+        Err(error) => {
+            betterlinuxcnc_error_client::report(
+                "configuration",
+                "configuration_write_failed",
+                &error.to_string(),
+            );
+            (
+                Response {
+                    document: None,
+                    error: Some(error.to_string()),
+                },
+                1,
+            )
+        }
     };
     let _ = serde_json::to_writer(io::stdout(), &response);
     code

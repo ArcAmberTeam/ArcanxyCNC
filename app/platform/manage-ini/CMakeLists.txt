@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
+file(GLOB_RECURSE error_record_client_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../error-records/client/src/*.rs")
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(BetterLinuxCNCManageIni LANGUAGES NONE)
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/ApplicationInstall.cmake")
@@ -13,7 +14,7 @@ add_custom_command(OUTPUT "${pa_binary}" "${pa_helper}"
     COMMAND "${CMAKE_COMMAND}" -E env "CARGO_TARGET_DIR=${pa_target}"
         "${CARGO_EXECUTABLE}" build --release --locked --bins
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    DEPENDS ${pa_sources} Cargo.toml Cargo.lock rust-toolchain.toml
+    DEPENDS ${error_record_client_sources} ${pa_sources} Cargo.toml Cargo.lock rust-toolchain.toml
     VERBATIM)
 add_custom_target(betterlinuxcnc-management-terminal ALL DEPENDS "${pa_binary}" "${pa_helper}")
 install(PROGRAMS "${pa_binary}" DESTINATION ${CMAKE_INSTALL_BINDIR})

@@ -10,6 +10,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from bettercnc_error_records import report
+
 from ._ipc import quiescent, status
 
 
@@ -277,6 +279,7 @@ class Runtime:
                 self._repair()
                 backoff = 1
             except (OSError, ValueError, RuntimeError) as error:
+                report("launcher", "process_error", str(error))
                 self._stop_cam()
                 self._publish("recovering")
                 print(f"保活等待 {backoff} 秒：{error}", flush=True)
@@ -357,6 +360,7 @@ class Runtime:
                 except RecoveryBlocked:
                     raise
                 except (OSError, ValueError, RuntimeError) as error:
+                    report("launcher", "process_error", str(error))
                     if not self.keep_alive:
                         raise
                     self._stop_cam()
@@ -366,6 +370,7 @@ class Runtime:
             except InterruptedError as error:
                 print(str(error), flush=True)
             except (OSError, ValueError, RuntimeError) as error:
+                report("launcher", "process_error", str(error))
                 print(f"启动编排失败：{error}", flush=True)
                 result = 78
             finally:

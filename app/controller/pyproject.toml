@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-2.0-or-later"
 license-files = ["LICENSE"]
-dependencies = []
+dependencies = ["betterlinuxcnc-error-records==0.1.0"]
 
 [project.scripts]
 betterlinuxcnc-service = "betterlinuxcnc_service:main"

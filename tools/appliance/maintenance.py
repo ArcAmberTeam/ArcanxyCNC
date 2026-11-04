@@ -11,7 +11,11 @@ from pathlib import Path
 
 LOG_ROOT = Path("/var/log/betterlinuxcnc/launcher")
 ALLOWED = ("help", "version", "status", "logs", "diagnostics", "axis-status")
-PA_COMMANDS = (("pa", "manage", "ini"), ("pa", "manage", "launcher.json"))
+PA_COMMANDS = (
+    ("pa", "manage", "ini"),
+    ("pa", "manage", "launcher.json"),
+    ("pa", "manage", "sudo", "open"),
+)
 RUN_NAME = re.compile(r"[0-9]{8}-[0-9]{6}-[1-9][0-9]*")
 LOG_NAME = re.compile(r"(?:controller|linuxcnc|cam-link)-[1-9][0-9]*\.log")
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -137,6 +141,20 @@ def main():
         words = []
     if not words:
         words = ["help"]
+    if words[0] == "sudo":
+        # Sudo enforces the root-owned expiry policy. Keep argument boundaries;
+        # SSH command text is never evaluated by a shell here.
+        os.execve(
+            "/usr/bin/sudo",
+            words,
+            {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+        )
+    if words[0] == "errors":
+        os.execve(
+            "/usr/lib/betterlinuxcnc/error-records/betterlinuxcnc-error-records",
+            ["betterlinuxcnc-error-records", "query", *words[1:]],
+            {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+        )
     if words[0] in ("git", "build-deb", "install-deb", "build-status"):
         os.execve(
             "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account",
@@ -173,11 +191,18 @@ def main():
                 "build-status",
                 "install-deb FILE",
             ],
+            "errorCommands": [
+                "errors",
+                "errors status",
+                "errors <category>",
+                "errors <event-id>",
+            ],
             "buildDirectory": "/var/lib/betterlinuxcnc/build",
             "shell": False,
             "upload": False,
             "forwarding": False,
-            "privilegeEscalation": False,
+            "privilegeEscalation": "password-authenticated sudo; 15-minute authorization",
+            "sudoCommands": ["pa manage sudo open", "sudo COMMAND"],
         }
     elif name == "logs":
         payload = {

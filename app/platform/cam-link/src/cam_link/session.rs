@@ -200,6 +200,7 @@ pub(super) async fn run<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 }
             }
             Err(error) => {
+                betterlinuxcnc_error_client::report("cam-link", &error.code, &error.message);
                 if matches!(request.method.as_str(), "upload.chunk" | "upload.finish") && !duplicate
                 {
                     session.transfer = Transfer::default();

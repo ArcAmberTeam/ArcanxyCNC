@@ -514,6 +514,7 @@ def main():
     installed_version = run("/usr/bin/python3", "-c", "import sys; sys.path.insert(0, '/usr/lib/betterlinuxcnc/python'); from bettercnc import __version__; print(__version__)").stdout.strip()
     require(installed_version == version, "Installed application version mismatch")
     verify_installed_homing(source, version)
+    run("/usr/bin/python3", str(source / ".github/ci/check-error-records.py"), str(source))
     verify_maintenance_workspace(package, source, version)
 
     # PA is installed in PATH without aliases, shell profiles, or elevated mode.
@@ -564,7 +565,7 @@ def main():
     ssh_policy = Path("/etc/ssh/sshd_config")
     sudo_policy = Path("/etc/sudoers")
     ssh_policy.write_text(ssh_policy.read_text().replace("PermitTTY yes", "PermitTTY no"))
-    sudo_policy.write_text("\n".join(line for line in sudo_policy.read_text().split("\n") if "pa-config" not in line))
+    sudo_policy.write_text("\n".join(line for line in sudo_policy.read_text().split("\n") if "pa-config" not in line and "cnc-maint-sudo" not in line and "cnc-maint-account" not in line))
     run("dpkg", "--force-confold", "--install", str(package))
     require(password_digest() == password, "Maintenance policy migration changed credentials")
     require(list(Path("/var/lib/betterlinuxcnc/recovery").glob("*-pa-policy/policies.json")), "Missing pre-PA policy recovery")
@@ -580,6 +581,8 @@ def main():
     require(sudo_rules == [
         "root ALL=(ALL:ALL) ALL",
         'cnc-maint ALL=(root) NOPASSWD: /usr/lib/betterlinuxcnc/manage-ini/pa-config ""',
+        '@include /etc/betterlinuxcnc/cnc-maint-sudo',
+        'cnc-maint ALL=(root) PASSWD: /usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account sudo-open',
     ], "Unexpected ordinary-user sudo rule or include")
     require("#include" not in Path("/etc/sudoers").read_text(), "Unexpected sudoers include")
     for account in ("linuxcnc", "cnc-maint"):
@@ -596,6 +599,10 @@ def main():
         )
     verify_installed_backup(version, policies)
     verify_pa_configuration()
+    ownership("/etc/betterlinuxcnc/cnc-maint-sudo", "root", "root", 0o440, directory=False)
+    require("NOPASSWD: ALL" not in Path("/etc/betterlinuxcnc/cnc-maint-sudo").read_text(), "Package opened sudo authorization")
+    denied = subprocess.run(["runuser", "-u", "cnc-maint", "--", "sudo", "-n", "-k", "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account", "sudo-open"], capture_output=True, text=True)
+    require(denied.returncode != 0 and "password" in denied.stderr.lower(), "Sudo activation did not require fresh authentication")
     print("DEB metadata, Rust binaries, provisioning, data retention, PA configuration, SSH/sudo and private backup rotation passed")
 
 

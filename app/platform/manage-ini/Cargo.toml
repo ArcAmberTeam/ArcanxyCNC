@@ -11,6 +11,7 @@ name = "pa"
 path = "src/main.rs"
 
 [dependencies]
+betterlinuxcnc-error-client = { path = "../error-records/client" }
 libc = "=0.2.191"
 unicode-width = { version = "=0.2.2", default-features = false }
 serde = { version = "1", features = ["derive"] }
