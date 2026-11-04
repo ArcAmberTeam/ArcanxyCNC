@@ -31,27 +31,37 @@ def check_axis_runtime(sandbox):
         check=True,
     )
     server_code = r"""
-import os, socket, struct, sys
+import contextlib, os, socket, struct, sys
 path, uid, gid = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-with socket.socket(socket.AF_UNIX) as server:
-    server.settimeout(45)
-    server.bind(path + '/bus')
-    os.chown(path + '/bus', uid, gid)
-    os.chmod(path + '/bus', 0o600)
-    server.listen(1)
+with contextlib.ExitStack() as stack:
+    servers = []
+    for name, expected_uid in [('control.sock', 0), ('bus', uid)]:
+        server = stack.enter_context(socket.socket(socket.AF_UNIX))
+        server.settimeout(90)
+        server.bind(path + '/' + name)
+        os.chown(path + '/' + name, uid, gid)
+        os.chmod(path + '/' + name, 0o600)
+        server.listen(1)
+        servers.append((server, expected_uid))
     print('ready', flush=True)
-    connection, _ = server.accept()
-    with connection:
-        connection.settimeout(5)
-        _, actual_uid, _ = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
-        assert actual_uid == uid
-        assert connection.recv(64) == b'axis-runtime-check'
-        connection.sendall(b'confirmed')
+    for server, expected_uid in servers:
+        connection, _ = server.accept()
+        with connection:
+            connection.settimeout(5)
+            _, actual_uid, _ = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+            assert actual_uid == expected_uid
+            assert connection.recv(64) == b'axis-runtime-check'
+            connection.sendall(b'confirmed')
 """
     client_code = r"""
 import errno, os, socket, sys
-path, uid = sys.argv[1], int(sys.argv[2])
+path, uid, name = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 assert os.getuid() == os.geteuid() == uid
+with socket.socket(socket.AF_UNIX) as client:
+    client.settimeout(5)
+    client.connect(path + '/' + name)
+    client.sendall(b'axis-runtime-check')
+    assert client.recv(64) == b'confirmed'
 try:
     with open(path + '/unexpected-write', 'x'):
         pass
@@ -59,11 +69,6 @@ except OSError as error:
     assert error.errno == errno.EROFS, error
 else:
     raise AssertionError('Runtime directory is writable inside the sandbox')
-with socket.socket(socket.AF_UNIX) as client:
-    client.settimeout(5)
-    client.connect(path + '/bus')
-    client.sendall(b'axis-runtime-check')
-    assert client.recv(64) == b'confirmed'
 print('runtime socket verified')
 """
     probe_code = r"""
@@ -78,7 +83,12 @@ except FileNotFoundError:
 assert stat.S_ISDIR(directory.st_mode) and directory.st_uid == uid
 assert stat.S_IMODE(directory.st_mode) == 0o700
 assert stat.S_ISSOCK(bus.st_mode) and bus.st_uid == uid
-subprocess.run(['/usr/sbin/runuser', '-u', 'nobody', '--', '/usr/bin/python3', '-c', client, path, str(uid)], check=True)
+control = os.stat(path + '/control.sock')
+assert stat.S_ISSOCK(control.st_mode) and control.st_uid == uid
+assert stat.S_IMODE(control.st_mode) == 0o600
+# The Rust updater observes machine.status as root, before stopping control.
+subprocess.run(['/usr/bin/python3', '-c', client, path, '0', 'control.sock'], check=True)
+subprocess.run(['/usr/sbin/runuser', '-u', 'nobody', '--', '/usr/bin/python3', '-c', client, path, str(uid), 'bus'], check=True)
 """
     server = None
     try:
@@ -120,6 +130,22 @@ subprocess.run(['/usr/sbin/runuser', '-u', 'nobody', '--', '/usr/bin/python3', '
                 "Legacy sandbox did not reproduce the missing runtime error: "
                 + failed.stderr[-2000:]
             )
+        missing_socket_access = [
+            item.replace(" CAP_DAC_OVERRIDE", "")
+            if item.startswith(
+                ("--property=CapabilityBoundingSet=", "--property=AmbientCapabilities=")
+            )
+            else item
+            for item in sandbox
+        ]
+        denied = subprocess.run(
+            missing_socket_access + probe, capture_output=True, text=True, timeout=30
+        )
+        if denied.returncode == 0 or "PermissionError: [Errno 13]" not in denied.stderr:
+            raise RuntimeError(
+                "Missing socket capability did not reproduce permission denial: "
+                + denied.stderr[-2000:]
+            )
         result = subprocess.run(
             sandbox + probe, capture_output=True, text=True, timeout=30
         )
@@ -129,17 +155,18 @@ subprocess.run(['/usr/sbin/runuser', '-u', 'nobody', '--', '/usr/bin/python3', '
         if server.returncode:
             raise RuntimeError("Runtime peer verification failed: " + errors[-2000:])
         print(
-            "Verified axis runtime visibility, actual unprivileged socket peer and read-only filesystem; legacy sandbox rejected"
+            "Verified root control socket and unprivileged bus peers with read-only runtime; hidden runtime and missing socket capability rejected"
         )
     finally:
         if server is not None:
-            server.communicate(timeout=50)
+            server.communicate(timeout=95)
         subprocess.run(
             [
                 "sudo",
                 "rm",
                 "-f",
                 str(directory / "bus"),
+                str(directory / "control.sock"),
                 str(directory / "unexpected-write"),
             ],
             check=True,
