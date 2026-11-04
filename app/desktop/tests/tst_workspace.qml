@@ -991,6 +991,16 @@ TestCase {
         verify(!control("settings-program.optional").enabled);
     }
 
+    function test_selfCompiledVersionIsDisplayOnly() {
+        click("open-settings"); click("settings-tab-about");
+        const updater = backend.firmwareUpdater;
+        const base = Qt.application.version || "—";
+        updater.selfCompiled = true;
+        compare(control("settings-about-应用版本").text, base + "（自编译）");
+        updater.selfCompiled = false;
+        compare(control("settings-about-应用版本").text, base);
+    }
+
     function test_firmwareUpdatesUseIndependentServiceAndFeedback() {
         window.width = 1024; window.height = 600;
         backend.update({powered: false, busy: false});

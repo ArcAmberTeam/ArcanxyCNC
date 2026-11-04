@@ -52,6 +52,7 @@ QtObject {
         }
     }
     property QtObject firmwareUpdater: QtObject {
+        property bool selfCompiled: false
         property bool available: true
         property var state: ({phase: "idle", message: "", progress: 0, version: ""})
         property int fetchCount: 0

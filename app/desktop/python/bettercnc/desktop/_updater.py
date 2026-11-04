@@ -39,6 +39,7 @@ class FirmwareUpdater(QObject):
             )
         )
         self._state = {"phase": "idle", "message": message, "progress": 0, "version": ""}
+        self._self_compiled = False
         self._process = QProcess(self)
         self._process.readyReadStandardOutput.connect(self._read)
         self._process.finished.connect(self._finished)
@@ -55,6 +56,7 @@ class FirmwareUpdater(QObject):
             QTimer.singleShot(0, lambda: self._start("status"))
 
     state = Property("QVariantMap", lambda self: self._state, notify=changed)
+    selfCompiled = Property(bool, lambda self: self._self_compiled, notify=changed)
     available = Property(bool, lambda self: self._available, constant=True)
 
     def _error(self, message):
@@ -93,6 +95,7 @@ class FirmwareUpdater(QObject):
                     or record.get("phase") not in self._phases
                     or not isinstance(record.get("message"), str)
                     or not isinstance(record.get("version", ""), str)
+                    or type(record.get("self_compiled", False)) is not bool
                     or type(record.get("progress", 0)) is not int
                     or not 0 <= record.get("progress", 0) <= 100
                 ):
@@ -103,6 +106,7 @@ class FirmwareUpdater(QObject):
                 self._error("更新服务返回了无效状态")
                 self._process.kill()
                 return
+            self._self_compiled = record.get("self_compiled", False)
             self._state = record
             self._seen = True
             self.changed.emit()

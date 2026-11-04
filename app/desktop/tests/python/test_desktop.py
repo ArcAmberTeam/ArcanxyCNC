@@ -266,6 +266,14 @@ class DesktopTests(unittest.TestCase):
         self.addCleanup(self.backend.close)
         return self.backend.firmwareUpdater
 
+    def test_self_compiled_origin_is_preserved_outside_debian_version(self):
+        updater = self.update_peer("""
+import json
+print(json.dumps({"phase":"idle", "message":"", "version":"26.11.04.6", "self_compiled":True}))
+""")
+        self.wait(lambda: updater.selfCompiled)
+        self.assertEqual(updater.state["version"], "26.11.04.6")
+
     def test_firmware_download_progress_single_flight_and_independent_install(self):
         calls = Path(self.temporary.name) / "calls.jsonl"
         updater = self.update_peer(f"""

@@ -28,9 +28,11 @@ fn status_survives_gui_restart_without_network_or_controller() {
     .unwrap();
     let output = invoke(directory.path(), &["status"]);
     assert!(output.status.success());
+    let mut expected = record;
+    expected["self_compiled"] = json!(false);
     assert_eq!(
         serde_json::from_slice::<Value>(&output.stdout).unwrap(),
-        record
+        expected
     );
 }
 

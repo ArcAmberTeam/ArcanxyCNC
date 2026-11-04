@@ -191,6 +191,7 @@ fn apply_locked(store: &Store) -> Result<()> {
     if storage::installed_version("0")? != staged.version {
         return Err("安装后版本核验不符；控制系统保持停止".into());
     }
+    betterlinuxcnc_local_update::clear_origin()?;
     launcher
         .resume()
         .map_err(|error| format!("更新已安装，但控制系统恢复失败：{error}"))?;
@@ -219,7 +220,7 @@ fn install_with_backup(
     }
     let mut install = super::command("/usr/bin/apt-get");
     install
-        .args(["--yes", "--no-remove", "install"])
+        .args(["--yes", "--no-remove", "--reinstall", "install"])
         .arg(package);
     Ok(execute(&mut install)?)
 }
@@ -232,7 +233,8 @@ fn verify_package(path: &Path, staged: &storage::Staged) -> Result<()> {
     {
         return Err("系统缓存安装包的版本或架构不符".into());
     }
-    if !storage::newer(&version, &storage::installed_version("0")?)? {
+    if !betterlinuxcnc_local_update::accepts_official(&version, &storage::installed_version("0")?)?
+    {
         return Err("拒绝安装相同或更低版本".into());
     }
     Ok(())
@@ -360,7 +362,13 @@ mod tests {
                 assert_eq!(calls[1].0, "/usr/bin/apt-get");
                 assert_eq!(
                     calls[1].1,
-                    ["--yes", "--no-remove", "install", package.to_str().unwrap()]
+                    [
+                        "--yes",
+                        "--no-remove",
+                        "--reinstall",
+                        "install",
+                        package.to_str().unwrap()
+                    ]
                 );
             }
         }

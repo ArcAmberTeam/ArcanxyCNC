@@ -170,19 +170,6 @@ pub(super) fn validate_version(value: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn newer(candidate: &str, installed: &str) -> Result<bool> {
-    validate_version(candidate)?;
-    validate_version(installed)?;
-    let status = super::command("/usr/bin/dpkg")
-        .args(["--compare-versions", candidate, "gt", installed])
-        .status()?;
-    match status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err("无法比较安装包版本".into()),
-    }
-}
-
 pub(super) fn installed_version(fallback: &str) -> Result<String> {
     validate_version(fallback)?;
     let output = super::command("/usr/bin/dpkg-query")
