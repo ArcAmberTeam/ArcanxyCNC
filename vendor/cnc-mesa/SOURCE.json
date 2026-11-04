@@ -1,10 +1,10 @@
 {
   "repository": "https://github.com/ArcAmberTeam/CNC-Mesa",
-  "release": "v26.11.04.2",
-  "commit": "715925974969c5a98ab08382f62b9b98ab85209c",
-  "archive": "cnc-mesa-integration-26.11.04.2.tar.gz",
-  "sha256": "242006810df21a045b96d08f3253061dab172a306ef7db1a8e4f94d932ded641",
-  "manifest_sha256": "9de51805ec9fc2ecccbaf835df96ab926cdc6ad23b50c9886744e4a14570d9dc",
+  "release": "v26.11.04.3",
+  "commit": "3c45d80ac831f654c74cf17b52258bdeadc1bb17",
+  "archive": "cnc-mesa-integration-26.11.04.3.tar.gz",
+  "sha256": "d81c8b3ea377c331dd8c3ce9529fdce190134fbd9c8b2d0b75806f8aa65376f6",
+  "manifest_sha256": "bce24ac974af186f8ce3511f5290645908048ffd61761f0adbc3fdbcf3b36499",
   "files": {
     "Makefile": "b0f7b1d3392c4426d27ff0393f0945002c1185de1682c902526348bd2702fafe",
     "docs/homing.md": "1a324f067aa23e0744d280c45409c16501e0513d93ffed6cb02f5c31e3e99f28",
