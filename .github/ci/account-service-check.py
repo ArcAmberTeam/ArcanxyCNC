@@ -1,8 +1,6 @@
 """Exercise the real socket-activated account service on an isolated hosted runner."""
 import json
 import os
-import pty
-import re
 from pathlib import Path
 import pwd
 import secrets
@@ -83,15 +81,19 @@ with socket.socket(socket.AF_UNIX) as connection:
     try:
         assert request("status") is False
         upload("denied")
-        assert request("enable", secrets.token_urlsafe(32)) is True
         password = secrets.token_urlsafe(32)
-        assert request("enable", password) is True
+        for op, value in (("enable", secrets.token_urlsafe(32)), ("disable", "")):
+            denied = subprocess.run(["runuser", "-u", "linuxcnc", "--", str(helper), "request", op],
+                                    input=value, capture_output=True, text=True, timeout=30)
+            assert denied.returncode != 0
+        run(str(helper), "enable", input=password)
         run(str(helper), "provision")
         assert request("status") is True
         upload("allowed")
         denied = subprocess.run(["runuser", "-u", "linuxcnc", "--", "/usr/bin/python3", "-c", probe, build_socket, "denied"], capture_output=True)
         assert denied.returncode != 0
         verify_sudo_access(helper, password)
+        assert request("enable", secrets.token_urlsafe(32)) is True
         assert request("disable") is False
         upload("denied")
         assert request("status") is False
@@ -110,19 +112,7 @@ def verify_sudo_access(helper, maintenance_password):
     policy = Path("/etc/betterlinuxcnc/cnc-admin-sudo")
     admin_password = secrets.token_urlsafe(32)
 
-    def issue(allowed=True):
-        master, terminal = pty.openpty()
-        try:
-            result = subprocess.run([str(helper), "issue-admin-code"], stdout=terminal,
-                                    stderr=subprocess.DEVNULL, timeout=10)
-            assert (result.returncode == 0) == allowed
-            if allowed:
-                code = os.read(master, 128).decode().strip()
-                assert re.fullmatch(r"[0-9A-F]{4}(?:-[0-9A-F]{4}){7}", code)
-                return code
-        finally:
-            os.close(master)
-            os.close(terminal)
+    record = Path("/var/lib/betterlinuxcnc/cnc-admin-enrollment")
 
     def setup_required():
         reply = run("runuser", "-u", "linuxcnc", "--", str(helper), "request", "admin-setup-required")
@@ -145,24 +135,31 @@ def verify_sudo_access(helper, maintenance_password):
         assert (result.returncode == 0 and result.stdout.strip() == "0") == allowed
 
     try:
-        previous_code = issue()
-        code = issue()
-        assert code != previous_code
+        assert record.read_text() == "pending\n"
+        for legacy in ("unissued\n", secrets.token_hex(32) + "\n"):
+            record.write_text(legacy)
+            run(str(helper), "provision")
+            assert record.read_text() == "pending\n"
+        credentials = f"{maintenance_password}\n{admin_password}"
+        switch("enroll", credentials, allowed=False)
         switch("enable", admin_password, allowed=False)  # Host policy not activated yet.
         with sudoers.open("ab") as stream:
             stream.write(f"\n@include {policy}\n".encode())
         run("visudo", "-c", "-f", str(sudoers))
         assert switch("status") is False
         assert setup_required() is True
-        switch("enroll", f"{previous_code}\n{admin_password}", allowed=False)
-        switch("enroll", f"{code}\n{admin_password}", allowed=False, caller="nobody")
-        run(str(helper), "provision")  # An update must preserve an unused code.
+        switch("enroll", f"{secrets.token_urlsafe(32)}\n{admin_password}", allowed=False)
+        switch("enroll", credentials, allowed=False, caller="nobody")
+        run(str(helper), "disable")
+        switch("enroll", credentials, allowed=False)
+        run(str(helper), "enable", input=maintenance_password)
+        assert setup_required() is True
         switch("enable", maintenance_password, allowed=False)
         switch("enable", admin_password, caller="nobody", allowed=False)
         elevate(False)
-        assert switch("enroll", f"{code}\n{admin_password}") is True
+        assert switch("enroll", credentials) is True
         assert setup_required() is False
-        issue(allowed=False)
+        assert record.read_text() == "complete\n"
         elevate(True)
         run(str(helper), "disable")
         assert switch("status") is True
@@ -171,16 +168,17 @@ def verify_sudo_access(helper, maintenance_password):
         switch("disable", maintenance_password, allowed=False)
         assert switch("status") is True
         assert switch("disable", admin_password) is False
-        switch("enroll", f"{code}\n{secrets.token_urlsafe(32)}", allowed=False)
+        run(str(helper), "enable", input=maintenance_password)
+        switch("enroll", f"{maintenance_password}\n{secrets.token_urlsafe(32)}", allowed=False)
         assert switch("enable", admin_password) is True
         assert switch("disable", admin_password) is False
         elevate(False)
         assert switch("status") is False
         # Upgrade an existing password-based installation without an enrollment record.
-        Path("/var/lib/betterlinuxcnc/cnc-admin-enrollment").unlink()
+        record.unlink()
         run(str(helper), "provision")
         assert setup_required() is False
-        issue(allowed=False)
+        assert record.read_text() == "complete\n"
         assert switch("enable", admin_password) is True
         assert switch("disable", admin_password) is False
         print("Persistent admin sudo, independent PAM authentication and immediate revocation passed")

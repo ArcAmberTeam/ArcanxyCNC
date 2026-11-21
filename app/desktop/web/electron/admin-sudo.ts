@@ -11,7 +11,7 @@ function request(operation: Operation, input = ''): Promise<boolean> {
       timeout: 20000, maxBuffer: 1024, encoding: 'utf8',
     }, (error, stdout) => {
       if (error) return reject(new Error(operation === 'admin-sudo-enroll'
-        ? '开通未确认，请核对开通码和新密码'
+        ? '设置失败，请核对 cnc-maint 运维密码和新的管理员密码'
         : '无法确认管理员 sudo 状态，请检查账户认证和本机服务'))
       try {
         const reply = JSON.parse(stdout)
@@ -33,12 +33,12 @@ export function adminSetupRequired() {
   return request('admin-setup-required')
 }
 
-export async function enrollAdmin(code: unknown, password: unknown) {
-  if (typeof code !== 'string' || code.length > 39 || !/^[a-f\d-]+$/i.test(code)
-    || code.replaceAll('-', '').length !== 32) throw new Error('开通码格式不正确')
+export async function enrollAdmin(maintenancePassword: unknown, password: unknown) {
+  if (typeof maintenancePassword !== 'string' || !maintenancePassword.length
+    || Buffer.byteLength(maintenancePassword) > 512 || /\p{Cc}/u.test(maintenancePassword)) throw new Error('请输入有效的 cnc-maint 运维密码')
   if (typeof password !== 'string' || Buffer.byteLength(password) < 8
     || Buffer.byteLength(password) > 256 || /[:\p{Cc}]/u.test(password)) throw new Error('密码需为 8 至 256 字节，不能包含冒号或控制字符')
-  const applied = await request('admin-sudo-enroll', `${code}\n${password}`)
+  const applied = await request('admin-sudo-enroll', `${maintenancePassword}\n${password}`)
   if (!applied) throw new Error('管理员服务未确认开通')
   return applied
 }

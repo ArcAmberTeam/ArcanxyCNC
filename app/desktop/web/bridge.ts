@@ -54,7 +54,7 @@ export interface SystemBridge {
 export interface AdminSudoBridge {
   status(): Promise<boolean>
   needsSetup(): Promise<boolean>
-  enroll(code: string, newPassword: string): Promise<boolean>
+  enroll(maintenancePassword: string, newPassword: string): Promise<boolean>
   setEnabled(enabled: boolean, password: string): Promise<boolean>
 }
 
