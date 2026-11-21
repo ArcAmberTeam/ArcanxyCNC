@@ -171,7 +171,9 @@ def register_kiosk_display():
             destination.symlink_to(source)
         except FileExistsError:
             if not destination.is_symlink() or destination.readlink() != source:
-                raise ValueError(f"Conflicting kiosk display integration: {destination}") from None
+                raise ValueError(
+                    f"Conflicting kiosk display integration: {destination}"
+                ) from None
 
 
 def install(root=Path("/")):
