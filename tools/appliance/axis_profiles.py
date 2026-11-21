@@ -90,6 +90,54 @@ def preset_template(filename):
     return (Path(__file__).resolve().parent / "templates" / filename).read_bytes()
 
 
+def initialize_machine_launcher(selected=None):
+    """Bind the first launcher to an installed profile under the migration lock."""
+    target = CONFIG / "launcher.json"
+    if os.path.lexists(target) or os.path.lexists(CONFIG / ".migration"):
+        if selected is not None:
+            raise ValueError("Existing launcher or pending machine import is preserved")
+        return
+    machine = CONFIG / "machine"
+    ini = selected
+    if ini is None:
+        candidates = [
+            path for path in machine.iterdir() if path.suffix.lower() == ".ini"
+        ]
+        if len(candidates) != 1:
+            return
+        ini = candidates[0]
+    if ini.parent != machine or ini.suffix.lower() != ".ini":
+        raise ValueError("Launcher selection requires an installed machine INI")
+    try:
+        data = trusted_read(ini)
+        if len(data) > 65536:
+            raise ValueError("Machine INI exceeds 64 KiB")
+        if selected is None and data.startswith(PROFILE_HEADER.encode()):
+            return
+        text = data.decode()
+        config = parse_ini(text)
+        if config.get("DISPLAY", "DISPLAY", fallback="") != "betterlinuxcnc":
+            raise ValueError("Machine INI must use the BetterLinuxCNC display")
+        if not all(
+            config.get(section, key, fallback="").strip()
+            for section, key in (
+                ("KINS", "KINEMATICS"),
+                ("TRAJ", "COORDINATES"),
+                ("HAL", "HALFILE"),
+            )
+        ):
+            raise ValueError("Machine INI must include kinematics, coordinates and HAL")
+        for name in hal_files(text):
+            trusted_read(ini.parent / name)
+    except (OSError, ValueError, configparser.Error) as error:
+        if selected is not None:
+            raise
+        print(f"Skipping automatic launcher configuration for {ini}: {error}")
+        return
+    atomic_json(target, {"ini": str(ini)})
+    print(f"Created {target} from {ini}")
+
+
 class MissingProfileHal(ValueError):
     def __init__(self, ini):
         super().__init__("此方案尚未配置机床 HAL")

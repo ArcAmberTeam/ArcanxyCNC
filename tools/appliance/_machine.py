@@ -103,11 +103,17 @@ def resolve(value, base):
     return Path(os.path.abspath(result if result.is_absolute() else base / result))
 
 
-def _build(source, config_dir, data_dir, configure_profile=None):
+def _build(
+    source, config_dir, data_dir, configure_profile=None, *, source_is_ini=False
+):
     source = Path(os.path.abspath(source))
-    with _file(source) as stream:
-        config = json.load(stream)
-    ini = resolve(config["ini"], source.parent)
+    if source_is_ini:
+        config = {}
+        ini = source
+    else:
+        with _file(source) as stream:
+            config = json.load(stream)
+        ini = resolve(config["ini"], source.parent)
     with _file(ini) as stream:
         text = stream.read().decode("utf-8")
     parser = configparser.ConfigParser(strict=False, interpolation=None)
@@ -117,15 +123,30 @@ def _build(source, config_dir, data_dir, configure_profile=None):
     profile = parser.get("DISPLAY", "DISPLAY", fallback="")
     if profile.split()[:1] != ["betterlinuxcnc"]:
         raise ValueError("Machine must already use the BetterLinuxCNC display")
-    program_source = resolve(parser.get("DISPLAY", "PROGRAM_PREFIX"), ini.parent)
+    if source_is_ini and not parser.get("HAL", "HALFILE", fallback="").strip():
+        raise ValueError("The selected machine INI must reference a HAL file")
+    program_prefix = (
+        parser.get("DISPLAY", "PROGRAM_PREFIX", fallback=None)
+        if source_is_ini
+        else parser.get("DISPLAY", "PROGRAM_PREFIX")
+    )
+    program_source = (
+        resolve(program_prefix, ini.parent) if program_prefix is not None else None
+    )
     if any(config.get("cam", {}).get(key) for key in ("token_file", "cert", "key")):
         raise ValueError("CAM credentials require a separately reviewed migration")
     target = config_dir / "machine"
     target.mkdir(mode=0o700)
     _copy_directory(ini.parent, target)
+    if source_is_ini:
+        from axis_configuration import hal_files
+
+        for name in hal_files(text):
+            if not (target / name).is_file():
+                raise ValueError(f"Missing local machine HAL file: {name}")
     for name in _NAMES:
         (data_dir / name).mkdir(mode=0o700)
-    if _identity(program_source) is not None:
+    if program_source is not None and _identity(program_source) is not None:
         _copy_directory(program_source, data_dir / "programs", programs_only=True)
     replacements = {
         ("DISPLAY", "PROGRAM_PREFIX"): str(DATA / "programs"),
@@ -148,6 +169,10 @@ def _build(source, config_dir, data_dir, configure_profile=None):
         header = re.match(r"\s*\[([^]]+)\]", line)
         if header:
             section = header.group(1).upper()
+            if section == "DISPLAY" and program_prefix is None:
+                output.append(line.rstrip("\r\n") + "\n")
+                output.append(f"PROGRAM_PREFIX = {DATA / 'programs'}\n")
+                continue
         setting = re.match(r"\s*([A-Za-z_0-9]+)\s*=", line)
         key = (section, setting.group(1).upper()) if setting else None
         if section == "FILTER" and setting:
@@ -292,12 +317,9 @@ def _recover(config_dir, data_dir):
         shutil.rmtree(stages["config"])
 
 
-def migrate(source, root=Path("/"), owner=None, configure_profile=None):
-    """Publish copies; launcher.json is the final, durable commit marker."""
-    root = Path(os.path.abspath(root))
-    _parents(root)
-    config_dir = root / CONFIG.relative_to("/")
-    data_dir = root / DATA.relative_to("/")
+@contextlib.contextmanager
+def migration_lock(config_dir):
+    _trusted(config_dir)
     lock = os.open(
         config_dir / ".migration.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
     )
@@ -311,6 +333,18 @@ def migrate(source, root=Path("/"), owner=None, configure_profile=None):
         ):
             raise ValueError("Untrusted migration lock")
         fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+
+
+def migrate(
+    source, root=Path("/"), owner=None, configure_profile=None, *, source_is_ini=False
+):
+    """Publish copies; launcher.json is the final, durable commit marker."""
+    root = Path(os.path.abspath(root))
+    _parents(root)
+    config_dir = root / CONFIG.relative_to("/")
+    data_dir = root / DATA.relative_to("/")
+    with migration_lock(config_dir):
         _recover(config_dir, data_dir)
         for name in ("machine", "launcher.json"):
             if _identity(config_dir / name) is not None:
@@ -330,6 +364,7 @@ def migrate(source, root=Path("/"), owner=None, configure_profile=None):
                 stages["config"] / "new",
                 stages["data"] / "new",
                 configure_profile,
+                source_is_ini=source_is_ini,
             )
             _protect_staged(stages["config"] / "new", stages["data"] / "new", owner)
             records = []
@@ -369,7 +404,7 @@ def migrate(source, root=Path("/"), owner=None, configure_profile=None):
     return config_dir / "machine"
 
 
-def stage(source, destination, configure_profile=None):
+def stage(source, destination, configure_profile=None, *, source_is_ini=False):
     """Expose a complete preview, or remove only the empty reservation we made."""
     destination = Path(os.path.abspath(destination))
     parent = destination.parent
@@ -388,7 +423,12 @@ def stage(source, destination, configure_profile=None):
         temporary = Path(tempfile.mkdtemp(prefix=".bettercnc-stage-", dir=parent))
         (temporary / CONFIG.relative_to("/")).mkdir(parents=True)
         (temporary / DATA.relative_to("/")).mkdir(parents=True)
-        migrate(source, temporary, configure_profile=configure_profile)
+        migrate(
+            source,
+            temporary,
+            configure_profile=configure_profile,
+            source_is_ini=source_is_ini,
+        )
         if _identity(destination) != reservation:
             raise ValueError("Staging destination changed; refusing to replace it")
         _rename(temporary, destination)

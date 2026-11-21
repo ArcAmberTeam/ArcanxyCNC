@@ -61,6 +61,10 @@ def run(command, **kwargs):
         return SimpleNamespace(returncode=0, stdout='inactive\n')
     raise AssertionError('Unexpected process: ' + repr(command))
 subprocess.run = run
+if arguments[0] == 'initialize-launcher':
+    selected = Path(arguments[1]) if len(arguments) == 2 else None
+    axis_profiles.initialize_machine_launcher(selected)
+    raise SystemExit(0)
 if fault == 'commit':
     original_replace = os.replace
     def replace(source, destination):
@@ -162,6 +166,47 @@ class AxisProfileCliTests(unittest.TestCase):
 
     def active_ini(self):
         return Path(json.loads(self.launcher.read_bytes())["ini"])
+
+    def test_automatic_launcher_preserves_settings_and_selects_one_site_ini(self):
+        def initialize():
+            result = self.invoke("initialize-launcher")
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+        initialize()
+        self.assertEqual(self.launcher.read_text(), self.launcher_content)
+        self.launcher.unlink()
+        other = self.machine / "second.ini"
+        other.write_text(self.original)
+        initialize()
+        self.assertFalse(self.launcher.exists())
+        other.unlink()
+        self.ini.write_bytes((MODULE / "templates/axis-5.ini").read_bytes())
+        initialize()
+        self.assertFalse(self.launcher.exists())
+        self.ini.write_text(self.original)
+        hal = self.machine / "custom.hal"
+        hal.unlink()
+        initialize()
+        self.assertFalse(self.launcher.exists())
+        hal.symlink_to(self.machine / "machine.hal")
+        initialize()
+        self.assertFalse(self.launcher.exists())
+        hal.unlink()
+        hal.write_text("# Site HAL\n")
+        initialize()
+        self.assertEqual(json.loads(self.launcher.read_text()), {"ini": str(self.ini)})
+        self.assertEqual(self.ini.read_text(), self.original)
+
+    def test_first_setup_can_select_one_of_several_installed_profiles(self):
+        self.launcher.unlink()
+        second = self.machine / "second.ini"
+        second.write_text(self.original)
+        result = self.invoke("initialize-launcher", str(second))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.active_ini(), second)
+        result = self.invoke("initialize-launcher", str(self.ini))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.active_ini(), second)
 
     def revision(self, count=5):
         result = self.invoke("prepare-system", str(count))

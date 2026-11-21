@@ -69,6 +69,43 @@ class MigrationTests(unittest.TestCase):
         self.assertFalse((root / "var/lib/betterlinuxcnc/.migration").exists())
         self.assertEqual((self.profile / "machine.ini").read_text(), self.original)
 
+    def test_stage_local_ini_without_source_launcher_or_program_prefix(self):
+        self.config.unlink()
+        ini = self.profile / "machine.ini"
+        original = self.original.replace("PROGRAM_PREFIX=../programs\n", "")
+        ini.write_text(original)
+        for name in ("first.hal", "second.hal"):
+            (self.profile / name).write_text("# Local HAL\n")
+        destination = self.base / "staged"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                str(MODULE / "main.py"),
+                "stage",
+                "--source-ini",
+                str(ini),
+                "--destination",
+                str(destination),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed = destination / "etc/betterlinuxcnc"
+        self.assertEqual(
+            json.loads((installed / "launcher.json").read_text()),
+            {"ini": "/etc/betterlinuxcnc/machine/machine.ini"},
+        )
+        self.assertIn(
+            "PROGRAM_PREFIX = /var/lib/betterlinuxcnc/programs",
+            (installed / "machine/machine.ini").read_text(),
+        )
+        self.assertEqual(ini.read_text(), original)
+        self.assertFalse(self.config.exists())
+
     def test_dangling_destination_link_cannot_create_a_file_outside_data(self):
         root = self.root()
         outside = self.base / "must-not-be-created"

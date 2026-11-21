@@ -58,13 +58,16 @@ def main():
     stage = commands.add_parser(
         "stage", help="Preview a machine import in a new staging directory"
     )
-    stage.add_argument("--source-config", required=True, type=Path)
     stage.add_argument("--destination", required=True, type=Path)
     prepare = commands.add_parser(
         "prepare", help="Create accounts and copy an existing machine profile"
     )
-    prepare.add_argument("--source-config", required=True, type=Path)
     for command in (stage, prepare):
+        source = command.add_mutually_exclusive_group(required=True)
+        source.add_argument("--source-config", type=Path, help="Existing launcher JSON")
+        source.add_argument(
+            "--source-ini", type=Path, help="Local BetterLinuxCNC machine INI"
+        )
         homing = command.add_mutually_exclusive_group()
         homing.add_argument(
             "--zhulong-inputs-only",
@@ -131,7 +134,12 @@ def main():
         )
         return 0
     if args.action == "stage":
-        root = _machine.stage(args.source_config, args.destination, configure_profile)
+        root = _machine.stage(
+            args.source_ini or args.source_config,
+            args.destination,
+            configure_profile,
+            source_is_ini=args.source_ini is not None,
+        )
         print(f"Migration staged without changing host policy: {root}")
         if args.zhulong_homing_travel_mm is not None:
             print(
@@ -151,6 +159,11 @@ def main():
         )
         if error_records.is_file():
             _accounts.run(str(error_records), "provision")
+        if (axis_profiles.CONFIG / "machine").is_dir() and not os.path.lexists(
+            axis_profiles.CONFIG / "launcher.json"
+        ):
+            with _machine.migration_lock(axis_profiles.CONFIG):
+                axis_profiles.initialize_machine_launcher()
         print("Machine axis migration: " + _axis_upgrade.upgrade())
         if (axis_profiles.CONFIG / "launcher.json").is_file():
             axis_profiles.AxisProfileStore().seed()
@@ -174,6 +187,13 @@ def main():
     elif args.action == "backup":
         print(json.dumps(_backup.backup()))
     elif args.action == "prepare":
+        installed_ini = args.source_ini and args.source_ini.absolute()
+        use_installed = (
+            installed_ini is not None
+            and installed_ini.parent == axis_profiles.CONFIG / "machine"
+        )
+        if use_installed and configure_profile is not None:
+            raise ValueError("Homing changes require a separate source profile")
         if args.zhulong_homing_travel_mm is not None:
             _homing.validate_installed()
         _accounts.prepare()
@@ -185,11 +205,16 @@ def main():
             )
             + "\n",
         )
-        _machine.migrate(
-            args.source_config,
-            owner=(account.pw_uid, account.pw_gid),
-            configure_profile=configure_profile,
-        )
+        if use_installed:
+            with _machine.migration_lock(axis_profiles.CONFIG):
+                axis_profiles.initialize_machine_launcher(installed_ini)
+        else:
+            _machine.migrate(
+                args.source_ini or args.source_config,
+                owner=(account.pw_uid, account.pw_gid),
+                configure_profile=configure_profile,
+                source_is_ini=args.source_ini is not None,
+            )
         axis_profiles.AxisProfileStore().seed()
         print("Prepared fixed appliance paths; original machine files are preserved")
     elif args.action == "set-maintenance-password":
