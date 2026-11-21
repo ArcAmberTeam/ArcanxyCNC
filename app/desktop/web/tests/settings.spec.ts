@@ -33,7 +33,7 @@ test('first activation sets a password, later sudo changes use the existing pass
   await page.getByLabel('确认新密码').fill('fixture-password')
   await page.getByRole('button', { name: '设置密码并开启' }).click()
   await expect(page.getByRole('alert')).toHaveText('运维密码验证失败')
-  await expect(toggle).not.toBeChecked()
+  expect(await page.evaluate(() => window.cncAdminSudo!.status())).toBe(false)
   await expect(page.getByLabel('cnc-maint 运维密码')).toHaveValue('')
   await page.getByLabel('cnc-maint 运维密码').fill('fixture-maintenance ')
   await page.getByLabel('设置新密码').fill('fixture-password')
