@@ -9,8 +9,8 @@ test('first activation sets a password, later sudo changes use the existing pass
     window.cncAdminSudo = {
       status: async () => enabled,
       needsSetup: async () => required,
-      enroll: async (code, password) => {
-        if (!required || code !== '1234-5678-9ABC-DEF0-1234-5678-9ABC-DEF0') throw new Error('Invalid code')
+      enroll: async (maintenancePassword, password) => {
+        if (!required || maintenancePassword !== 'fixture-maintenance ') throw new Error('运维密码验证失败')
         required = false
         credential = password
         return enabled = true
@@ -25,16 +25,23 @@ test('first activation sets a password, later sudo changes use the existing pass
   await page.getByRole('button', { name: '设置', exact: true }).click()
   const toggle = page.getByRole('switch', { name: 'cnc_admin sudo' })
   await toggle.click()
-  await page.getByLabel('一次性开通码').fill('1234-5678-9ABC-DEF0-1234-5678-9ABC-DEF0')
+  await page.getByLabel('cnc-maint 运维密码').fill('wrong-credential')
   await page.getByLabel('设置新密码').fill('fixture-password')
   await page.getByLabel('确认新密码').fill('different')
   await page.getByRole('button', { name: '设置密码并开启' }).click()
   await expect(page.getByRole('alert')).toHaveText('两次输入的密码不一致')
   await page.getByLabel('确认新密码').fill('fixture-password')
   await page.getByRole('button', { name: '设置密码并开启' }).click()
+  await expect(page.getByRole('alert')).toHaveText('运维密码验证失败')
+  expect(await page.evaluate(() => window.cncAdminSudo!.status())).toBe(false)
+  await expect(page.getByLabel('cnc-maint 运维密码')).toHaveValue('')
+  await page.getByLabel('cnc-maint 运维密码').fill('fixture-maintenance ')
+  await page.getByLabel('设置新密码').fill('fixture-password')
+  await page.getByLabel('确认新密码').fill('fixture-password')
+  await page.getByRole('button', { name: '设置密码并开启' }).click()
   await expect(toggle).toBeChecked()
   await toggle.click()
-  await expect(page.getByLabel('一次性开通码')).toHaveCount(0)
+  await expect(page.getByLabel('cnc-maint 运维密码')).toHaveCount(0)
   await page.getByLabel('管理员密码').fill('fixture-password')
   await page.getByRole('button', { name: '确认', exact: true }).click()
   await expect(toggle).not.toBeChecked()

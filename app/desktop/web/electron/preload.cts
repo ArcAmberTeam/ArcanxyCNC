@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('cncSystem', systemBridge)
 const adminSudo: AdminSudoBridge = {
   status: () => ipcRenderer.invoke('admin-sudo:status'),
   needsSetup: () => ipcRenderer.invoke('admin-sudo:setup-required'),
-  enroll: (code, password) => ipcRenderer.invoke('admin-sudo:enroll', code, password),
+  enroll: (maintenancePassword, password) => ipcRenderer.invoke('admin-sudo:enroll', maintenancePassword, password),
   setEnabled: (enabled, password) => ipcRenderer.invoke('admin-sudo:set', enabled, password),
 }
 contextBridge.exposeInMainWorld('cncAdminSudo', adminSudo)

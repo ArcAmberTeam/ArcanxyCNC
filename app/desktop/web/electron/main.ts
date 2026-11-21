@@ -45,9 +45,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('system:info', event => { authorize(event); return getSystemInfo() })
   ipcMain.handle('admin-sudo:status', event => { authorize(event); return adminSudoStatus() })
   ipcMain.handle('admin-sudo:setup-required', event => { authorize(event); return adminSetupRequired() })
-  ipcMain.handle('admin-sudo:enroll', (event, code: unknown, password: unknown) => {
+  ipcMain.handle('admin-sudo:enroll', (event, maintenancePassword: unknown, password: unknown) => {
     authorize(event)
-    return enrollAdmin(code, password)
+    return enrollAdmin(maintenancePassword, password)
   })
   ipcMain.handle('admin-sudo:set', (event, enabled: unknown, password: unknown) => {
     authorize(event)

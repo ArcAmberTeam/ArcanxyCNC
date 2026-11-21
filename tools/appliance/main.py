@@ -49,10 +49,6 @@ def main():
         help="Idempotently create dedicated accounts and system data directories",
     )
     commands.add_parser(
-        "issue-admin-code",
-        help="Issue a one-time administrator code on the installer terminal",
-    )
-    commands.add_parser(
         "backup", help="Create a verified root-private configuration snapshot"
     )
     commands.add_parser(
@@ -144,8 +140,6 @@ def main():
         return 0
     if sys.platform != "linux" or os.geteuid() != 0:
         raise ValueError("Host provisioning requires a Linux root maintenance session")
-    if args.action == "issue-admin-code":
-        os.execv(ACCOUNT_MANAGER, [str(ACCOUNT_MANAGER), "issue-admin-code"])
     if args.action == "provision":
         _accounts.provision()
         axis_profiles.install_integration()

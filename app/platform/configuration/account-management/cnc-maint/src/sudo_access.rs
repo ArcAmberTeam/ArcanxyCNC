@@ -100,15 +100,14 @@ fn replace_file(path: &str, content: &str, mode: u32) -> Result<()> {
     result
 }
 
-fn authenticate(password: &str) -> Result<()> {
-    crate::validate_identity("cnc_admin", "/var/lib/betterlinuxcnc/admin")?;
+fn authenticate(account: &str, password: &str) -> Result<()> {
     if managed_file(PAM)?.as_deref() != Some(PAM_STACK) {
         return Err("Admin authentication policy unavailable".into());
     }
     let mut pam = command("/usr/bin/pamtester")
         .args([
             "betterlinuxcnc-admin",
-            "cnc_admin",
+            account,
             "authenticate(PAM_DISALLOW_NULL_AUTHTOK)",
             "acct_mgmt",
         ])
@@ -144,7 +143,8 @@ pub(super) fn request(desired: Option<bool>, password: &str) -> Result<bool> {
     if let Some(desired) = desired {
         // Authenticate every change, including retries and requests to turn sudo off.
         // 开关两种操作都校验 cnc_admin 的密码，重复请求同样需要验证。
-        authenticate(password)?;
+        crate::validate_identity("cnc_admin", "/var/lib/betterlinuxcnc/admin")?;
+        authenticate("cnc_admin", password)?;
         enrollment::finish()?;
         if desired != enabled {
             replace_file(POLICY, if desired { OPEN } else { CLOSED }, 0o440)?;

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "betterlinuxcnc-session"
-version = "26.11.21.1"
+version = "26.11.21.2"
 description = "Headless Unix status client for BetterLinuxCNC"
 requires-python = ">=3.11"
 license = "GPL-2.0-or-later"

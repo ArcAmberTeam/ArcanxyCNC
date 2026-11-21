@@ -217,8 +217,15 @@ fn apply(operation: &str, password: &str) -> Result<bool> {
         "admin-sudo-disable" => return sudo_access::request(Some(false), password),
         _ => {}
     }
+    maintenance(operation, password, true)
+}
+
+fn maintenance(operation: &str, password: &str, operator_request: bool) -> Result<bool> {
     validate_account()?;
     let _guard = ledger()?;
+    if operator_request && matches!(operation, "enable" | "disable") {
+        sudo_access::enrollment::protect_maintenance_password()?;
+    }
     match operation {
         "status" => {}
         "enable" => enable(password)?,
@@ -386,7 +393,6 @@ pub fn run() -> Result<()> {
         return Err("Fixed root operation required".into());
     }
     match args[0].as_str() {
-        "issue-admin-code" => sudo_access::enrollment::issue(),
         "provision" => register(),
         "serve" => serve(),
         "install-serve" => workspace::serve_install(),
@@ -394,12 +400,16 @@ pub fn run() -> Result<()> {
             let password = bounded(io::stdin())?;
             println!(
                 "{}",
-                response(apply("enable", password.trim_end_matches('\n'))?)
+                response(maintenance(
+                    "enable",
+                    password.trim_end_matches('\n'),
+                    false
+                )?)
             );
             Ok(())
         }
         "disable" | "status" => {
-            print!("{}", response(apply(&args[0], "")?));
+            print!("{}", response(maintenance(&args[0], "", false)?));
             Ok(())
         }
         _ => Err("Unknown account operation".into()),
