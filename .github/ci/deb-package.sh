@@ -14,7 +14,7 @@ apt-get update
 mapfile -t native_packages < .github/ci/native/packages.txt
 apt-get install -y --no-install-recommends \
   "${native_packages[@]}" cmake curl xz-utils ca-certificates
-bash .github/ci/setup-desktop-node.sh
+bash .github/ci/setup-desktop-node.sh /tmp/betterlinuxcnc-node.tar.xz
 curl --fail --silent --show-error --location --retry 3 \
   https://sh.rustup.rs --output /tmp/rustup-init.sh
 sh /tmp/rustup-init.sh -y --no-modify-path --default-toolchain none
@@ -26,6 +26,7 @@ done
 cmake -S /workspace -B /tmp/application-build \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
   -DCMAKE_INSTALL_PREFIX:PATH=/usr -DCMAKE_INSTALL_LIBDIR:STRING=lib \
+  -DBETTERCNC_BUILD_NODE_ARCHIVE=/tmp/betterlinuxcnc-node.tar.xz \
   -DBETTERCNC_PROJECT_DIR=/etc/betterlinuxcnc \
   -DBETTERCNC_BUILD_SYSTEM_SERVICES=ON -DBETTERCNC_BUILD_MESA_HOMING=ON \
   -DPython3_EXECUTABLE=/usr/bin/python3

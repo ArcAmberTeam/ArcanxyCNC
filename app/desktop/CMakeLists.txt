@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(BetterLinuxCNCSession VERSION 26.11.21.3 LANGUAGES NONE)
+    project(BetterLinuxCNCSession VERSION 26.11.22.1 LANGUAGES NONE)
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ApplicationInstall.cmake")
     message(STATUS "Installing the headless session client only")
 endif()
@@ -22,7 +22,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CU
     add_custom_command(OUTPUT "${stage}/packaged.stamp"
         COMMAND "${CMAKE_COMMAND}" -E env "PATH=${node_dir}:$ENV{PATH}"
             "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/package_web.py"
-            "${web}" "${stage}" "${DESKTOP_NPM}"
+            "${web}" "${stage}" "${DESKTOP_NPM}" "${BETTERCNC_LOCAL_PACKAGE_VERSION}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${stage}/packaged.stamp"
         DEPENDS ${desktop_inputs} ${desktop_config} "${version_manifest}"
             "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/package_web.py"

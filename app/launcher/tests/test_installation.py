@@ -304,6 +304,9 @@ class InstallationTests(unittest.TestCase):
             parser = configparser.ConfigParser(interpolation=None)
             parser.read(unit)
             self.assertEqual(parser["Service"]["Restart"], "on-failure")
+            self.assertEqual(
+                parser["Unit"]["ConditionPathExists"], "/etc/betterlinuxcnc/launcher.json"
+            )
             self.assertIn("SIGKILL", parser["Service"]["RestartPreventExitStatus"])
             self.assertIn("78", parser["Service"]["RestartPreventExitStatus"])
             self.assertEqual(parser["Service"]["KillMode"], "process")
@@ -320,7 +323,8 @@ class InstallationTests(unittest.TestCase):
             session.read(stage / "usr/share/xsessions/betterlinuxcnc-kiosk.desktop")
             self.assertEqual(
                 session["Desktop Entry"]["Exec"],
-                "/usr/bin/betterlinuxcnc-launch --kiosk-session",
+                "/usr/bin/betterlinuxcnc-launch --kiosk-session "
+                "--config /etc/betterlinuxcnc/launcher.json",
             )
             self.assertEqual(session["Desktop Entry"]["TryExec"], "/usr/bin/betterlinuxcnc-launch")
             parser.read(stage / "etc/xdg/autostart/betterlinuxcnc-autostart.desktop")

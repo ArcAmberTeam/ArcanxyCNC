@@ -9,4 +9,7 @@ trap 'rm -rf "$node_download"' EXIT
 curl --fail --silent --show-error --location --retry 3 "https://nodejs.org/dist/v${node_version}/$node_archive" --output "$node_download/$node_archive"
 curl --fail --silent --show-error --location --retry 3 "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" --output "$node_download/SHASUMS256.txt"
 (cd "$node_download" && awk -v archive="$node_archive" '$2 == archive' SHASUMS256.txt | sha256sum --check --strict -)
+if [[ $# == 1 ]]; then
+  install -m 0644 "$node_download/$node_archive" "$1"
+fi
 tar -xJf "$node_download/$node_archive" -C /usr/local --strip-components=1

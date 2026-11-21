@@ -154,6 +154,7 @@ def main():
         print("Machine axis migration: " + _axis_upgrade.upgrade())
         if (axis_profiles.CONFIG / "launcher.json").is_file():
             axis_profiles.AxisProfileStore().seed()
+        _policy.register_kiosk_display()
         if Path("/run/systemd/system").is_dir():
             _accounts.run("/usr/bin/systemctl", "daemon-reload")
             if Path(

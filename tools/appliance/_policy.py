@@ -15,19 +15,9 @@ cnc-maint ALL=(root) PASSWD: /usr/lib/betterlinuxcnc/account-management/cnc-main
 """
 
 POLICIES = {
-    "/etc/lightdm/lightdm.conf.d/90-betterlinuxcnc.conf": """[Seat:*]
-autologin-user=linuxcnc
-autologin-user-timeout=0
-autologin-session=betterlinuxcnc-kiosk
-user-session=betterlinuxcnc-kiosk
-allow-guest=false
-allow-user-switching=false
-greeter-hide-users=true
-greeter-show-manual-login=false
-# Fail closed instead of exposing a general-purpose greeter on session failure.
-greeter-session=betterlinuxcnc-disabled
-xserver-command=X -nolisten tcp
-""",
+    "/etc/lightdm/lightdm.conf.d/90-betterlinuxcnc.conf": (
+        Path(__file__).parent / "packaging/90-betterlinuxcnc.conf"
+    ).read_text(encoding="utf-8"),
     "/etc/X11/xorg.conf.d/90-betterlinuxcnc.conf": """Section "ServerFlags"
     Option "DontVTSwitch" "true"
     Option "DontZap" "true"
@@ -161,6 +151,29 @@ def write(path, text, mode=0o644):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def register_kiosk_display():
+    """Publish boot defaults without restarting the active graphical session."""
+    sources = Path("/usr/lib/betterlinuxcnc/appliance/packaging")
+    generator = sources / "betterlinuxcnc-display-generator"
+    if not generator.is_file():
+        return
+    # Deliver both files in the private package tree accepted by older updaters.
+    # Publish the seat configuration before making the generator discoverable.
+    for name, directory in (
+        ("90-betterlinuxcnc.conf", "/usr/share/lightdm/lightdm.conf.d"),
+        (generator.name, "/usr/lib/systemd/system-generators"),
+    ):
+        source = sources / name
+        destination = Path(directory) / name
+        try:
+            destination.symlink_to(source)
+        except FileExistsError:
+            if not destination.is_symlink() or destination.readlink() != source:
+                raise ValueError(
+                    f"Conflicting kiosk display integration: {destination}"
+                ) from None
 
 
 def install(root=Path("/")):

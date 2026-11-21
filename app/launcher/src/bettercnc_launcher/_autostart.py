@@ -42,11 +42,11 @@ def _start_status_page(stop_requested):
                 break
         raise RuntimeError("专用状态页未能及时显示")
     except BaseException:
-        _stop_status_page(process)
+        _stop_display(process)
         raise
 
 
-def _stop_status_page(process):
+def _stop_display(process):
     if process is None:
         return
     if process.poll() is None:
@@ -56,7 +56,8 @@ def _stop_status_page(process):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
-    process.stdout.close()
+    if process.stdout is not None:
+        process.stdout.close()
 
 
 def start_session(*, kiosk=False):
@@ -104,7 +105,20 @@ def _keep_display_visible():
         subprocess.run([command, *arguments], check=True, timeout=5)
 
 
-def run_kiosk_session():
+def _run_setup_desktop(stop_requested):
+    """Keep the frontend available on an unconfigured machine until logout."""
+    while not stop_requested():
+        with subprocess.Popen(["betterlinuxcnc", "--kiosk", "--fullscreen"]) as desktop:
+            try:
+                while not stop_requested() and desktop.poll() is None:
+                    time.sleep(0.25)
+            finally:
+                _stop_display(desktop)
+        if not stop_requested():
+            time.sleep(2)
+
+
+def run_kiosk_session(config_path):
     """Own the X11 session lifetime independently of the supervised machine stack."""
     if os.getuid() == 0:
         raise ValueError("专用图形会话必须由普通操作账户运行")
@@ -127,6 +141,9 @@ def run_kiosk_session():
             _keep_display_visible()
         except (subprocess.SubprocessError, OSError, ValueError) as error:
             print(f"无法关闭显示器自动节能：{error}", flush=True)
+        if not config_path.is_file():
+            _run_setup_desktop(lambda: stopping)
+            return 0
         try:
             status_page = _start_status_page(lambda: stopping)
         except (subprocess.SubprocessError, OSError, ValueError, RuntimeError) as error:
@@ -146,6 +163,6 @@ def run_kiosk_session():
             time.sleep(0.25)
         return 0
     finally:
-        _stop_status_page(status_page)
+        _stop_display(status_page)
         for sig, handler in previous.items():
             signal.signal(sig, handler)

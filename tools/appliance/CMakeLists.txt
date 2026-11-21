@@ -11,7 +11,11 @@ install(FILES _package_identity.py main.py maintenance.py axis_profiles.py axis_
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/appliance")
 install(DIRECTORY templates/
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/appliance/templates" OPTIONAL)
+install(FILES packaging/90-betterlinuxcnc.conf
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/appliance/packaging")
 if(BETTERCNC_BUILD_SYSTEM_SERVICES)
+    install(PROGRAMS packaging/betterlinuxcnc-display-generator
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/appliance/packaging")
     configure_file(packaging/betterlinuxcnc-axis-profile@.service.in
         betterlinuxcnc-axis-profile@.service @ONLY)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/betterlinuxcnc-axis-profile@.service"

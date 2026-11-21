@@ -1,6 +1,7 @@
 [Unit]
 Description=BetterLinuxCNC process orchestration
 PartOf=graphical-session.target
+ConditionPathExists=@BETTERCNC_PROJECT_DIR@/launcher.json
 StartLimitIntervalSec=0
 
 [Service]

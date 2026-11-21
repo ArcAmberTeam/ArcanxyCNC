@@ -64,6 +64,20 @@ struct Origin {
     version: String,
     sha256: String,
 }
+impl Origin {
+    fn replace(&self, path: &Path) -> Result<()> {
+        let parent = path.parent().ok_or("Missing origin parent")?;
+        let mut marker = tempfile::NamedTempFile::new_in(parent)?;
+        serde_json::to_writer(&mut marker, self)?;
+        marker
+            .as_file()
+            .set_permissions(fs::Permissions::from_mode(0o644))?;
+        marker.as_file().sync_all()?;
+        marker.persist(path)?;
+        File::open(parent)?.sync_all()?;
+        Ok(())
+    }
+}
 /// Read only the root-owned successful-install record for the actual installed version.
 pub fn is_self_compiled(version: &str) -> Result<bool> {
     let path = Path::new(ORIGIN);
@@ -127,9 +141,13 @@ pub fn accepts_official(candidate: &str, installed: &str) -> Result<bool> {
 /// Call after a verified official package has installed successfully, before restarting UI.
 pub fn clear_origin() -> Result<()> {
     root()?;
-    trusted_directory(Path::new(ORIGIN).parent().ok_or("Missing origin parent")?)?;
+    let parent = Path::new(ORIGIN).parent().ok_or("Missing origin parent")?;
+    trusted_directory(parent)?;
     match fs::remove_file(ORIGIN) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            File::open(parent)?.sync_all()?;
+            Ok(())
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
@@ -247,22 +265,12 @@ impl PreparedLocalPackage {
         }
         let parent = Path::new(ORIGIN).parent().ok_or("Missing origin parent")?;
         trusted_directory(parent)?;
-        let mut marker = tempfile::NamedTempFile::new_in(parent)?;
-        serde_json::to_writer(
-            &mut marker,
-            &Origin {
-                schema_version: 1,
-                version: self.version,
-                sha256: self.sha256,
-            },
-        )?;
-        marker
-            .as_file()
-            .set_permissions(fs::Permissions::from_mode(0o644))?;
-        marker.as_file().sync_all()?;
-        marker.persist(ORIGIN)?;
-        File::open(parent)?.sync_all()?;
-        Ok(())
+        Origin {
+            schema_version: 1,
+            version: self.version,
+            sha256: self.sha256,
+        }
+        .replace(Path::new(ORIGIN))
     }
 }
 // END: PreparedLocalPackage
@@ -275,6 +283,22 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn consecutive_local_installs_replace_the_origin_for_the_same_release() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("origin.json");
+        for digest in ["1", "2"] {
+            let origin = Origin {
+                schema_version: 1,
+                version: "26.11.22.1".into(),
+                sha256: digest.repeat(64),
+            };
+            origin.replace(&path).unwrap();
+            let stored: Origin = serde_json::from_reader(File::open(&path).unwrap()).unwrap();
+            assert_eq!(stored.sha256, origin.sha256);
+            assert!(official_policy(&stored.version, &stored.version, true).unwrap());
+        }
+    }
     #[test]
     fn official_release_can_replace_same_version_local_build_but_never_downgrade() {
         if !cfg!(target_os = "linux") {

@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const ROOT: &str = "/var/lib/betterlinuxcnc/build";
 const REPOSITORY: &str = "https://github.com/ArcAmberTeam/ArcanxyCNC.git";
+const NODE_ARCHIVE: &str = "/usr/lib/betterlinuxcnc/package-build/node.tar.xz";
 const MAX_PACKAGE: u64 = 256 * 1024 * 1024;
 unsafe extern "C" {
     fn getuid() -> u32;
@@ -163,6 +164,7 @@ fn build() -> Result<()> {
         "package-build",
         "local-update",
         "error-records",
+        "system-info",
     ] {
         execute(
             process("/usr/bin/cargo")
@@ -182,6 +184,13 @@ assert record['application_version'] == version, 'Installed homing provenance ve
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     let work = Path::new(ROOT).join(format!("work/{stamp}"));
     fs::create_dir(&work)?;
+    let node = work.join("node");
+    fs::create_dir(&node)?;
+    execute(
+        process("/usr/bin/tar")
+            .args(["-xJf", NODE_ARCHIVE, "--strip-components=1", "-C"])
+            .arg(&node),
+    )?;
     execute(
         process("/usr/bin/cmake")
             .arg("-S")
@@ -189,6 +198,9 @@ assert record['application_version'] == version, 'Installed homing provenance ve
             .arg("-B")
             .arg(&work)
             .arg(format!("-DBETTERCNC_LOCAL_PACKAGE_VERSION={base_version}"))
+            .arg(format!("-DBETTERCNC_BUILD_NODE_ARCHIVE={NODE_ARCHIVE}"))
+            .arg(format!("-DDESKTOP_NODE={}/bin/node", node.display()))
+            .arg(format!("-DDESKTOP_NPM={}/bin/npm", node.display()))
             .args([
                 "-DCMAKE_BUILD_TYPE=Release",
                 "-DBUILD_TESTING=OFF",
@@ -250,6 +262,7 @@ assert record['application_version'] == version, 'Installed homing provenance ve
         .open(Path::new(ROOT).join("packages").join(&name))?;
     io::copy(&mut File::open(package)?, &mut destination)?;
     destination.sync_all()?;
+    fs::remove_dir_all(&work)?;
     println!("Built {ROOT}/packages/{name}; version unchanged; not installed");
     Ok(())
 }

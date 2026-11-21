@@ -1,12 +1,13 @@
 """Build the locked Electron application in a private CMake build tree."""
 
+import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 
-def package(web, stage, npm):
+def package(web, stage, npm, local_version):
     desktop = stage / "app/desktop"
     staged_web = desktop / "web"
     staged_web.mkdir(parents=True, exist_ok=True)
@@ -21,7 +22,11 @@ def package(web, stage, npm):
     shutil.copyfile(web.parent / "LICENSE", desktop / "LICENSE")
     versions = stage / "versions"
     versions.mkdir(exist_ok=True)
-    shutil.copyfile(web.parents[2] / "versions/version.json", versions / "version.json")
+    manifest = versions / "version.json"
+    if local_version:
+        manifest.write_text(json.dumps({"schema_version": 1, "version": f"{local_version}-dev"}))
+    else:
+        shutil.copyfile(web.parents[2] / "versions/version.json", manifest)
     for arguments in (["ci", "--no-audit", "--no-fund"], ["run", "build"], ["run", "package"]):
         subprocess.run([npm, *arguments], cwd=staged_web, check=True)
     bundle = staged_web / "release/linux-unpacked"
@@ -31,4 +36,6 @@ def package(web, stage, npm):
 
 
 if __name__ == "__main__":
-    package(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3])
+    package(
+        Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else ""
+    )
