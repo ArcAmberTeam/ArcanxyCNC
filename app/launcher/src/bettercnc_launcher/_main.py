@@ -27,7 +27,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.kiosk_session:
-            return run_kiosk_session()
+            return run_kiosk_session(args.config or Path("/etc/betterlinuxcnc/launcher.json"))
         if args.session_start:
             return start_session()
         if args.config is not None and not args.config.expanduser().is_file():

@@ -12,3 +12,8 @@ add_custom_command(OUTPUT "${module_binary}"
     VERBATIM)
 add_custom_target(betterlinuxcnc-package-build-binary ALL DEPENDS "${module_binary}")
 install(PROGRAMS "${module_binary}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/package-build")
+set(BETTERCNC_BUILD_NODE_ARCHIVE "" CACHE FILEPATH "Verified Node toolchain for maintenance rebuilds")
+if(BETTERCNC_BUILD_NODE_ARCHIVE)
+    install(FILES "${BETTERCNC_BUILD_NODE_ARCHIVE}"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/package-build" RENAME node.tar.xz)
+endif()

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Select the kiosk for graphical boots. Rescue and text targets do not pull in
+# display-manager.service. Leave explicit administrator masks in effect.
+set -eu
+for dir in /etc/systemd/system /run/systemd/system; do
+    for unit in display-manager.service lightdm.service; do
+        if [ -e "$dir/$unit" ] && [ ! -s "$dir/$unit" ]; then
+            exit 0
+        fi
+    done
+done
+ln -s /usr/lib/systemd/system/lightdm.service "${2:?}/display-manager.service"

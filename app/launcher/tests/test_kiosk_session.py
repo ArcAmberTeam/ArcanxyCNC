@@ -16,6 +16,8 @@ class KioskSessionTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="kiosk-session-", dir="/tmp")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.config = self.root / "launcher.json"
+        self.config.write_text("{}")
         self.records = self.root / "requests.jsonl"
         self.status_records = self.root / "status.jsonl"
         self.display_records = self.root / "display.jsonl"
@@ -65,7 +67,7 @@ class KioskSessionTests(unittest.TestCase):
 
     def launch(self, mode, **environment):
         process = subprocess.Popen(
-            [sys.executable, "-m", "bettercnc_launcher", mode],
+            [sys.executable, "-m", "bettercnc_launcher", mode, "--config", str(self.config)],
             env=dict(self.environment, **environment),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -129,6 +131,24 @@ class KioskSessionTests(unittest.TestCase):
         self.assertEqual(records[1]["fullscreen"], "0")
         self.assertFalse(self.status_records.exists())
         self.assertFalse(self.display_records.exists())
+
+    @unittest.skipIf(os.getuid() == 0, "the operator session deliberately rejects root")
+    def test_new_machine_opens_fullscreen_without_starting_the_machine_service(self):
+        self.config.unlink()
+        process = self.launch("--kiosk-session")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if self.status_records.exists() and self.status_records.stat().st_size:
+                break
+            time.sleep(0.02)
+        self.assertTrue(self.status_records.is_file())
+        process.terminate()
+        output = process.communicate(timeout=5)[0]
+        self.assertEqual(process.returncode, 0, output)
+        events = [json.loads(line) for line in self.status_records.read_text().splitlines()]
+        self.assertEqual([event["event"] for event in events], ["started", "stopped"])
+        self.assertEqual(events[0]["args"], ["--kiosk", "--fullscreen"])
+        self.assertFalse(self.records.exists())
 
     @unittest.skipIf(os.getuid() == 0, "the operator session deliberately rejects root")
     def test_status_page_failure_does_not_restart_it_over_the_machine_ui(self):

@@ -172,6 +172,19 @@ def verify_maintenance_account():
 
 def verify_xsession_entry():
     """Let Debian's real argument parser resolve the installed LightDM entry."""
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        early = root / "early"
+        early.mkdir()
+        run("/usr/lib/systemd/system-generators/betterlinuxcnc-display-generator",
+            str(root), str(early), str(root))
+        require((early / "display-manager.service").resolve(strict=True) ==
+                Path("/usr/lib/systemd/system/lightdm.service").resolve(strict=True),
+                "Graphical boot did not select LightDM")
+    config_dump = run("/usr/sbin/lightdm", "--show-config")
+    settings = config_dump.stdout + config_dump.stderr
+    for option in ("autologin-user=linuxcnc", "autologin-session=betterlinuxcnc-kiosk"):
+        require(option in settings, f"Missing effective LightDM option: {option}")
     session = configparser.ConfigParser(interpolation=None)
     session.read("/usr/share/xsessions/betterlinuxcnc-kiosk.desktop")
     command = session["Desktop Entry"]["Exec"]
@@ -188,7 +201,8 @@ printf '%s\n' "$STARTUP"
 '''
     result = run("/bin/sh", "-eu", "-c", script, "xsession-entry", command)
     require(
-        result.stdout.strip() == "/usr/bin/betterlinuxcnc-launch --kiosk-session",
+        result.stdout.strip() == "/usr/bin/betterlinuxcnc-launch --kiosk-session "
+        "--config /etc/betterlinuxcnc/launcher.json",
         "Debian Xsession did not select the dedicated installed launcher",
     )
 
@@ -451,19 +465,25 @@ def verify_maintenance_workspace(package, source, version):
     cmake.write_text(cmake.read_text().replace("VERSION " + version, "VERSION 99.1.1.1", 1))
     metadata = checkout / "app/desktop/python/bettercnc/__init__.py"
     metadata.write_text(metadata.read_text().replace(version, "99.1.1.1"))
+    # Model a machine that already installed a local build of this release.
+    origin = Path("/var/lib/betterlinuxcnc/build-origin.json")
+    origin.write_text(json.dumps({"schema_version": 1, "version": version, "sha256": "1" * 64}))
+    origin.chmod(0o644)
     subprocess.run(["runuser", "-u", "cnc-maint", "--", helper, "workspace", "build-deb"], check=True, timeout=1500, umask=0o002)
     built = list((workspace / "packages").glob("*.deb"))
     require(len(built) == 1, "Local build did not produce one package")
     require(run("dpkg-deb", "-f", str(built[0]), "Version").stdout.strip() == version, "Local build changed the Debian version")
     validate_deb_paths(built[0], source)
-    for path in ("usr/lib/linuxcnc/modules/zhulong_homing.so", "usr/share/betterlinuxcnc/homing/provenance.json"):
-        with tempfile.TemporaryDirectory() as temporary:
-            run("dpkg-deb", "-x", str(built[0]), temporary)
+    with tempfile.TemporaryDirectory() as temporary:
+        run("dpkg-deb", "-x", str(built[0]), temporary)
+        for path in ("usr/lib/linuxcnc/modules/zhulong_homing.so", "usr/share/betterlinuxcnc/homing/provenance.json"):
             require((Path(temporary) / path).read_bytes() == (Path("/") / path).read_bytes(), "Local build replaced the commissioned homing payload")
-            metadata = Path(temporary) / "usr/lib/betterlinuxcnc/python/bettercnc/__init__.py"
-            require('__version__ = "' + version + '"' in metadata.read_text(), "Local desktop version differs from its DEB")
+        toolchain = Path("usr/lib/betterlinuxcnc/package-build/node.tar.xz")
+        require((Path(temporary) / toolchain).read_bytes() == (Path("/") / toolchain).read_bytes(),
+                "Local DEB did not retain the frontend toolchain for the next rebuild")
+        metadata = Path(temporary) / "usr/lib/betterlinuxcnc/python/bettercnc/__init__.py"
+        require('__version__ = "' + version + '"' in metadata.read_text(), "Local desktop version differs from its DEB")
     # Exercise origin presentation with a real root-owned record, no machine operation.
-    origin = Path("/var/lib/betterlinuxcnc/build-origin.json")
     origin.write_text(json.dumps({"schema_version": 1, "version": version, "sha256": hashlib.sha256(built[0].read_bytes()).hexdigest()}))
     origin.chmod(0o644)
     try:
