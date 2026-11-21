@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(BetterLinuxCNCSession VERSION 26.11.05.1 LANGUAGES NONE)
+    project(BetterLinuxCNCSession VERSION 26.11.21.1 LANGUAGES NONE)
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ApplicationInstall.cmake")
     message(STATUS "Installing the headless session client only")
 endif()

@@ -360,6 +360,8 @@ jobs:
             --mount "type=bind,src=$GITHUB_WORKSPACE/release-artifacts,dst=/output" \
             --workdir /workspace debian:13-slim \
             bash .github/ci/deb-package.sh
+      - name: Package Mesa sources and manifest from the same Git revision
+        run: python3 .github/ci/package-mesa.py release-artifacts
       - uses: actions/upload-artifact@v7
         with:
           name: betterlinuxcnc-deb-${{ github.sha }}

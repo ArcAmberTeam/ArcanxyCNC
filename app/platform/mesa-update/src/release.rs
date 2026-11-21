@@ -7,7 +7,6 @@ use std::io::Read;
 use std::time::Duration;
 
 const API: &str = "https://api.github.com/repos/ArcAmberTeam";
-const MESA: &str = "CNC-Mesa";
 const APP: &str = "ArcanxyCNC";
 const MAX_METADATA: u64 = 1024 * 1024;
 
@@ -114,28 +113,24 @@ pub(crate) struct MesaRelease {
 }
 
 pub(crate) fn latest_pair(fetch: &impl Fetch) -> Result<(String, MesaRelease)> {
-    let application = fetch_release(fetch, APP, "latest")?;
+    let application = fetch_release(fetch, "latest")?;
     let application_version = version(&application)?.to_owned();
-    let mesa = fetch_release(fetch, MESA, "latest")?;
-    Ok((application_version, verify_manifest(fetch, mesa)?))
+    Ok((application_version, verify_manifest(fetch, application)?))
 }
 
 pub(crate) fn installed_release(fetch: &impl Fetch, installed: &str) -> Result<MesaRelease> {
     if !contract::valid_version(installed) {
         return Err("Installed application version is not a supported release version".into());
     }
-    let release = fetch_release(fetch, MESA, &format!("tags/v{installed}"))?;
+    let release = fetch_release(fetch, &format!("tags/v{installed}"))?;
     if version(&release)? != installed {
         return Err("Official Mesa release does not match the installed application".into());
     }
     verify_manifest(fetch, release)
 }
 
-fn fetch_release(fetch: &impl Fetch, repository: &str, selector: &str) -> Result<Release> {
-    let bytes = fetch.get(
-        &format!("{API}/{repository}/releases/{selector}"),
-        MAX_METADATA,
-    )?;
+fn fetch_release(fetch: &impl Fetch, selector: &str) -> Result<Release> {
+    let bytes = fetch.get(&format!("{API}/{APP}/releases/{selector}"), MAX_METADATA)?;
     let release: Release = serde_json::from_slice(&bytes)?;
     version(&release)?;
     Ok(release)
@@ -163,7 +158,7 @@ fn asset(release: &Release, name: &str, size: Option<u64>) -> Result<Asset> {
     }
     let selected = matches[0];
     let expected = format!(
-        "https://github.com/ArcAmberTeam/{MESA}/releases/download/{}/{name}",
+        "https://github.com/ArcAmberTeam/{APP}/releases/download/{}/{name}",
         release.tag_name
     );
     if selected.browser_download_url != expected
@@ -208,7 +203,7 @@ fn verify_manifest(fetch: &impl Fetch, release: Release) -> Result<MesaRelease> 
 
 fn verify_tag(fetch: &impl Fetch, manifest: &Manifest) -> Result<()> {
     let bytes = fetch.get(
-        &format!("{API}/{MESA}/git/ref/tags/{}", manifest.tag_name),
+        &format!("{API}/{APP}/git/ref/tags/{}", manifest.tag_name),
         MAX_METADATA,
     )?;
     let mut object: GitReference = serde_json::from_slice(&bytes)?;
@@ -230,7 +225,7 @@ fn verify_tag(fetch: &impl Fetch, manifest: &Manifest) -> Result<()> {
             break;
         }
         object = serde_json::from_slice(&fetch.get(
-            &format!("{API}/{MESA}/git/tags/{}", object.object.sha),
+            &format!("{API}/{APP}/git/tags/{}", object.object.sha),
             MAX_METADATA,
         )?)?;
     }
@@ -274,18 +269,18 @@ mod tests {
         let bytes = serde_json::to_vec(manifest).unwrap();
         let mut assets = vec![serde_json::json!({
             "name": "mesa-release.json", "size": bytes.len(),
-            "browser_download_url": format!("https://github.com/ArcAmberTeam/CNC-Mesa/releases/download/{}/mesa-release.json", manifest.tag_name),
+            "browser_download_url": format!("https://github.com/ArcAmberTeam/ArcanxyCNC/releases/download/{}/mesa-release.json", manifest.tag_name),
         })];
         for artifact in [&manifest.artifacts.source, &manifest.artifacts.integration] {
             assets.push(serde_json::json!({
                 "name": artifact.asset, "size": artifact.size_bytes,
-                "browser_download_url": format!("https://github.com/ArcAmberTeam/CNC-Mesa/releases/download/{}/{}", manifest.tag_name, artifact.asset),
+                "browser_download_url": format!("https://github.com/ArcAmberTeam/ArcanxyCNC/releases/download/{}/{}", manifest.tag_name, artifact.asset),
             }));
         }
         if let Some(name) = &manifest.firmware.asset {
             assets.push(serde_json::json!({
                 "name": name, "size": manifest.firmware.size,
-                "browser_download_url": format!("https://github.com/ArcAmberTeam/CNC-Mesa/releases/download/{}/{name}", manifest.tag_name),
+                "browser_download_url": format!("https://github.com/ArcAmberTeam/ArcanxyCNC/releases/download/{}/{name}", manifest.tag_name),
             }));
         }
         let release = serde_json::to_vec(&serde_json::json!({
@@ -295,11 +290,10 @@ mod tests {
         Fixture {
             calls: RefCell::new(Vec::new()),
             responses: BTreeMap::from([
-                (format!("{API}/{MESA}/releases/tags/{}", manifest.tag_name), release.clone()),
-                (format!("{API}/{MESA}/releases/latest"), release.clone()),
-                ("https://api.github.com/repos/ArcAmberTeam/ArcanxyCNC/releases/latest".into(), release),
-                (format!("https://github.com/ArcAmberTeam/CNC-Mesa/releases/download/{}/mesa-release.json", manifest.tag_name), bytes),
-                (format!("{API}/{MESA}/git/ref/tags/{}", manifest.tag_name), serde_json::to_vec(&serde_json::json!({"object":{"type":"commit", "sha":manifest.source_commit}})).unwrap()),
+                (format!("{API}/{APP}/releases/tags/{}", manifest.tag_name), release.clone()),
+                (format!("{API}/{APP}/releases/latest"), release),
+                (format!("https://github.com/ArcAmberTeam/ArcanxyCNC/releases/download/{}/mesa-release.json", manifest.tag_name), bytes),
+                (format!("{API}/{APP}/git/ref/tags/{}", manifest.tag_name), serde_json::to_vec(&serde_json::json!({"object":{"type":"commit", "sha":manifest.source_commit}})).unwrap()),
             ]),
         }
     }
@@ -322,14 +316,14 @@ mod tests {
     fn official_source_commit_and_stable_release_are_required() {
         let manifest = contract::fixture();
         let mut fetch = fixture(&manifest);
-        let ref_url = format!("{API}/{MESA}/git/ref/tags/{}", manifest.tag_name);
+        let ref_url = format!("{API}/{APP}/git/ref/tags/{}", manifest.tag_name);
         fetch.responses.insert(
             ref_url,
             br#"{"object":{"type":"commit","sha":"bad"}}"#.to_vec(),
         );
         assert!(installed_release(&fetch, "26.10.26.1").is_err());
         let mut fetch = fixture(&manifest);
-        let url = format!("{API}/{MESA}/releases/tags/{}", manifest.tag_name);
+        let url = format!("{API}/{APP}/releases/tags/{}", manifest.tag_name);
         let mut value: serde_json::Value = serde_json::from_slice(&fetch.responses[&url]).unwrap();
         value["prerelease"] = true.into();
         fetch
@@ -354,7 +348,7 @@ mod tests {
         };
         let mut fetch = fixture(&manifest);
         let url = format!(
-            "https://github.com/ArcAmberTeam/CNC-Mesa/releases/download/{}/new.bit",
+            "https://github.com/ArcAmberTeam/ArcanxyCNC/releases/download/{}/new.bit",
             manifest.tag_name
         );
         fetch.responses.insert(url.clone(), b"bit".to_vec());
@@ -362,7 +356,7 @@ mod tests {
         assert_eq!(firmware(&fetch, &release).unwrap(), Some(b"bit".to_vec()));
         fetch.responses.insert(url, b"old".to_vec());
         assert!(firmware(&fetch, &release).is_err());
-        let url = format!("{API}/{MESA}/releases/tags/{}", manifest.tag_name);
+        let url = format!("{API}/{APP}/releases/tags/{}", manifest.tag_name);
         let mut value: serde_json::Value = serde_json::from_slice(&fetch.responses[&url]).unwrap();
         value["assets"][0]["browser_download_url"] = "https://example.com/mesa-release.json".into();
         fetch

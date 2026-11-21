@@ -3,3 +3,4 @@
 .github/ export-ignore
 # Preserve the byte-verified upstream release snapshot, including original CRLF.
 vendor/cnc-mesa/** -text -whitespace
+vendor/cnc-mesa-fpga/** -text -whitespace
