@@ -272,6 +272,7 @@ class ControllerRuntime:
                 clearance_confirmed=params["clearanceConfirmed"],
                 machining_confirmed=params["machiningConfirmed"],
                 disable_block_delete=params.get("disableBlockDelete", False),
+                power_on=params.get("powerOn", False),
             )
         elif method == "cam.job.start":
             result = controller.start_received(params["transferId"])
@@ -353,9 +354,14 @@ class ControllerRuntime:
                 keys += ("clearanceConfirmed",)
             if method == "cam.workflow.start":
                 keys += ("machiningConfirmed",)
-            optional = ("disableBlockDelete",) if method == "cam.workflow.start" else ()
+            optional = ("disableBlockDelete", "powerOn") if method == "cam.workflow.start" else ()
             self._params(params, required=keys, optional=optional)
-            for key in ("clearanceConfirmed", "machiningConfirmed", "disableBlockDelete"):
+            for key in (
+                "clearanceConfirmed",
+                "machiningConfirmed",
+                "disableBlockDelete",
+                "powerOn",
+            ):
                 if key in params and params[key] is not True:
                     raise ProtocolError("invalid_params", key + " must be true")
             if self._cam_inbox is None:

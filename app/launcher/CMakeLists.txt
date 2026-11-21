@@ -17,7 +17,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/betterlinuxcnc-launcher.service"
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/betterlinuxcnc-autostart.desktop"
     DESTINATION "/etc/xdg/autostart")
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../launcher.example.json"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/betterlinuxcnc-qt/examples")
-install(FILES packaging/betterlinuxcnc-qt.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/betterlinuxcnc/examples")
+install(FILES packaging/betterlinuxcnc.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/betterlinuxcnc-kiosk.desktop"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/xsessions")

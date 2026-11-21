@@ -126,6 +126,18 @@ class PolicyTests(unittest.TestCase):
             self.assertEqual(saved["/etc/ssh/sshd_config"], legacy_ssh)
             self.assertEqual(saved["/etc/sudoers"], legacy_sudo)
 
+    def test_upgrade_replaces_the_timed_maintenance_sudo_include(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            policy.install(root)
+            path = root / "etc/sudoers"
+            current = path.read_text()
+            path.write_text(
+                current.replace(policy.SUDO_ACCESS, policy.LEGACY_SUDO_ACCESS)
+            )
+            self.assertEqual(policy.upgrade_maintenance(root), "upgraded")
+            self.assertEqual(path.read_text(), current)
+
     def test_fixed_policy_removes_override_sources_and_preserves_original(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -1,0 +1,22 @@
+[Unit]
+Description=Read or save machine axis profile parameters
+
+[Service]
+ExecStart=/usr/lib/betterlinuxcnc/manage-ini/pa-config axis-parameters
+StandardInput=socket
+StandardOutput=inherit
+StandardError=journal
+User=root
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=no
+PrivateDevices=yes
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/etc/betterlinuxcnc /var/cache/betterlinuxcnc /var/lib/betterlinuxcnc
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN
+AmbientCapabilities=CAP_SETUID CAP_SETGID CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN

@@ -7,11 +7,11 @@ on:
     types: [completed]
   pull_request_target:
     branches: [main]
-    types: [closed, labeled]
+    types: [closed]
   workflow_dispatch:
     inputs:
       pr_number:
-        description: Already merged main PR with the build-release label
+        description: Already merged main PR with a -release application version
         required: true
         type: string
 
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   resolve:
-    name: Resolve a labeled, merged PR and its successful CI artifact
+    name: Resolve a release version, merged PR and successful CI artifact
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -54,7 +54,7 @@ jobs:
                 number = Number(input);
               }
               const {data: pr} = await github.rest.pulls.get({...repo, pull_number: number});
-              if (!pr.merged || pr.base.ref !== 'main' || !pr.labels.some(label => label.name === 'build-release')) return;
+              if (!pr.merged || pr.base.ref !== 'main') return;
               sha = pr.merge_commit_sha;
               candidates = [pr];
             } else {
@@ -65,9 +65,27 @@ jobs:
               candidates = await Promise.all(associated.map(async item => (await github.rest.pulls.get({...repo, pull_number: item.number})).data));
             }
             if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Invalid merge commit');
-            const eligible = candidates.filter(pr => pr.merged && pr.base.ref === 'main' && pr.base.repo.full_name === `${repo.owner}/${repo.repo}` && pr.merge_commit_sha === sha && pr.labels.some(label => label.name === 'build-release'));
+            const eligible = candidates.filter(pr => pr.merged && pr.base.ref === 'main' && pr.base.repo.full_name === `${repo.owner}/${repo.repo}` && pr.merge_commit_sha === sha);
             if (eligible.length !== 1) return;
             const pr = eligible[0];
+            async function readVersion(ref) {
+              let data;
+              try { ({data} = await github.rest.repos.getContent({...repo, path: 'versions/version.json', ref})); }
+              catch (error) { if (error.status === 404) return null; throw error; }
+              const manifest = JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'));
+              if (manifest.schema_version !== 1 || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+\.\d+-(dev|release)$/.test(manifest.version)) throw new Error('Invalid application version manifest');
+              return manifest.version;
+            }
+            const declaredVersion = await readVersion(sha);
+            if (!declaredVersion?.endsWith('-release')) return;
+            const version = declaredVersion.slice(0, -'-release'.length);
+            // Retry the original commit, but never republish this version from a later commit.
+            try {
+              let object = (await github.rest.git.getRef({...repo, ref: `tags/v${version}`})).data.object;
+              for (let depth = 0; object.type === 'tag' && depth < 8; depth++) object = (await github.rest.git.getTag({...repo, tag_sha: object.sha})).data.object;
+              if (object.type !== 'commit') throw new Error('Release tag does not resolve to a commit');
+              if (object.sha !== sha) { core.info('This version already belongs to another commit; increment the version to publish again.'); return; }
+            } catch (error) { if (error.status !== 404) throw error; }
             const {data: comparison} = await github.rest.repos.compareCommitsWithBasehead({...repo, basehead: `${sha}...main`});
             if (!['ahead', 'identical'].includes(comparison.status)) throw new Error('Release commit is not on main');
             const {data: workflow} = await github.rest.actions.getWorkflow({...repo, workflow_id: 'ci.yml'});
@@ -83,11 +101,12 @@ jobs:
             const {data: metadata} = await github.rest.repos.getContent({...repo, path: 'app/desktop/pyproject.toml', ref: sha});
             const match = Buffer.from(metadata.content, 'base64').toString('utf8').match(/^version\s*=\s*"(\d+\.\d+\.\d+\.\d+)"\s*$/m);
             if (!match) throw new Error('Expected a four-part application release version');
+            if (match[1] !== version) throw new Error('JSON version differs from the application package version');
             core.setOutput('ready', 'true');
             core.setOutput('sha', sha);
             core.setOutput('run-id', String(run.id));
             core.setOutput('artifact-id', String(matches[0].id));
-            core.setOutput('version', match[1]);
+            core.setOutput('version', version);
             core.setOutput('pr', String(pr.number));
 
   publish:
@@ -121,7 +140,8 @@ jobs:
             const sha = process.env.RELEASE_SHA;
             const version = process.env.RELEASE_VERSION;
             const tag = `v${version}`;
-            const name = `betterlinuxcnc-qt_${version}_amd64.deb`;
+            const name = `betterlinuxcnc_${version}_amd64.deb`;
+            const bridge = `betterlinuxcnc-qt_${version}_amd64.deb`;
             const root = 'release-artifact';
             const mesa = {owner: 'ArcAmberTeam', repo: 'CNC-Mesa'};
             async function verifyMesaRelease() {
@@ -186,18 +206,26 @@ jobs:
               }
             } catch (error) { if (error.status !== 404) throw error; }
             const {data: pr} = await github.rest.pulls.get({...repo, pull_number: Number(process.env.RELEASE_PR)});
-            if (!pr.merged || pr.base.ref !== 'main' || pr.merge_commit_sha !== sha || !pr.labels.some(label => label.name === 'build-release')) throw new Error('Release authorization changed');
+            if (!pr.merged || pr.base.ref !== 'main' || pr.base.repo.full_name !== `${repo.owner}/${repo.repo}` || pr.merge_commit_sha !== sha) throw new Error('Release authorization changed');
+            const {data: versionFile} = await github.rest.repos.getContent({...repo, path: 'versions/version.json', ref: sha});
+            const versionManifest = JSON.parse(Buffer.from(versionFile.content, 'base64').toString('utf8'));
+            if (versionManifest.schema_version !== 1 || versionManifest.version !== `${version}-release`) throw new Error('Release version authorization changed');
             const files = fs.readdirSync(root).sort();
-            if (JSON.stringify(files) !== JSON.stringify(['SHA256SUMS', 'SOURCE_COMMIT', name].sort())) throw new Error('Unexpected artifact files');
+            if (JSON.stringify(files) !== JSON.stringify(['SHA256SUMS', 'SOURCE_COMMIT', name, bridge].sort())) throw new Error('Unexpected artifact files');
             for (const file of files) if (!fs.lstatSync(`${root}/${file}`).isFile()) throw new Error('Artifact must contain only regular files');
             if (fs.readFileSync(`${root}/SOURCE_COMMIT`, 'utf8').trim() !== sha) throw new Error('Artifact commit mismatch');
             const data = fs.readFileSync(`${root}/${name}`);
-            const digest = crypto.createHash('sha256').update(data).digest('hex');
-            if (fs.readFileSync(`${root}/SHA256SUMS`, 'utf8') !== `${digest}  ${name}\n`) throw new Error('Package checksum mismatch');
-            for (const [field, expected] of Object.entries({Package: 'betterlinuxcnc-qt', Version: version, Architecture: 'amd64'})) {
-              const actual = execFileSync('dpkg-deb', ['--field', `${root}/${name}`, field], {encoding: 'utf8'}).trim();
-              if (actual !== expected) throw new Error(`Package ${field} mismatch`);
+            const bridgeData = fs.readFileSync(`${root}/${bridge}`);
+            const sums = [];
+            for (const [filename, bytes, packageName] of [[name, data, 'betterlinuxcnc'], [bridge, bridgeData, 'betterlinuxcnc-qt']]) {
+              sums.push([filename, crypto.createHash('sha256').update(bytes).digest('hex')]);
+              for (const [field, expected] of Object.entries({Package: packageName, Version: version, Architecture: 'amd64'})) {
+                const actual = execFileSync('dpkg-deb', ['--field', `${root}/${filename}`, field], {encoding: 'utf8'}).trim();
+                if (actual !== expected) throw new Error(`Package ${field} mismatch in ${filename}`);
+              }
             }
+            const checksumLines = fs.readFileSync(`${root}/SHA256SUMS`, 'utf8').trimEnd().split('\n').sort();
+            if (JSON.stringify(checksumLines) !== JSON.stringify(sums.map(([file, hash]) => `${hash}  ${file}`).sort())) throw new Error('Package checksum mismatch');
             try {
               const {data: reference} = await github.rest.git.getRef({...repo, ref: `tags/${tag}`});
               let object = reference.object;
@@ -208,10 +236,10 @@ jobs:
             try { release = (await github.rest.repos.getReleaseByTag({...repo, tag})).data; }
             catch (error) { if (error.status !== 404) throw error; }
             if (!release) {
-              release = (await github.rest.repos.createRelease({...repo, tag_name: tag, target_commitish: sha, name: `demo ${tag}`, draft: true, prerelease: false, body: `Built and installation-tested by GitHub CI from ${sha}.\n\nMerged PR #${pr.number}. Install the Debian package; source archives are not installation packages.\n\nPaired with [CNC-Mesa ${tag}](https://github.com/${mesa.owner}/${mesa.repo}/releases/tag/${tag}); mesa-release.json and CNC_MESA_PAIR.json record the source commit and manifest digest. Firmware is unavailable: this release provides no new ISE bitstream and authorizes no board flashing. Factory bitstreams are not update payloads. Implementation, timing and board validation remain unverified.`})).data;
+              release = (await github.rest.repos.createRelease({...repo, tag_name: tag, target_commitish: sha, name: `demo ${tag}`, draft: true, prerelease: false, body: `Built and installation-tested by GitHub CI from ${sha}.\n\nMerged PR #${pr.number}. New installations use \`${name}\`. Existing \`betterlinuxcnc-qt\` installations receive the compatibility package on their first update and \`betterlinuxcnc\` on their next update.\n\nPaired with [CNC-Mesa ${tag}](https://github.com/${mesa.owner}/${mesa.repo}/releases/tag/${tag}); mesa-release.json and CNC_MESA_PAIR.json record the source commit and manifest digest. Firmware is unavailable: this release provides no new ISE bitstream and authorizes no board flashing. Factory bitstreams are not update payloads. Implementation, timing and board validation remain unverified.`})).data;
             }
             if (release.draft && release.target_commitish !== sha) throw new Error('Existing draft targets another commit');
-            for (const [assetName, content] of [[name, data], ['SHA256SUMS', fs.readFileSync(`${root}/SHA256SUMS`)], ['mesa-release.json', paired.bytes], ['CNC_MESA_PAIR.json', paired.evidence]]) {
+            for (const [assetName, content] of [[name, data], [bridge, bridgeData], ['SHA256SUMS', fs.readFileSync(`${root}/SHA256SUMS`)], ['mesa-release.json', paired.bytes], ['CNC_MESA_PAIR.json', paired.evidence]]) {
               const existing = release.assets.find(asset => asset.name === assetName);
               const expected = `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`;
               if (existing) {

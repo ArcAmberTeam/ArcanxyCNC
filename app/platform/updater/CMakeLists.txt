@@ -40,3 +40,4 @@ install(CODE "
             TYPE FILE FILES \"${CMAKE_CURRENT_SOURCE_DIR}/packaging/updater.json\")
     endif()
 ")
+install(PROGRAMS packaging/rename-apt-guard DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc")

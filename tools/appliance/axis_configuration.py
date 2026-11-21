@@ -29,7 +29,7 @@ def parse_ini(text):
             if (
                 (section, key) in seen
                 and seen[section, key] != setting
-                and not (section == "HAL" and key in HAL_KEYS)
+                and not (section == "HAL" and key in (*HAL_KEYS, "HALCMD"))
             ):
                 raise ValueError("Ambiguous repeated INI setting: " + key)
             seen[section, key] = setting
@@ -40,9 +40,11 @@ def parse_ini(text):
 def axis_count(text):
     ini = parse_ini(text)
     coordinates = "".join(ini.get("TRAJ", "COORDINATES").split()).upper()
-    count = next((count for count, axes in AXES.items() if axes == coordinates), None)
+    count = 5 if coordinates == "XYZBC" else next(
+        (count for count, axes in AXES.items() if axes == coordinates), None
+    )
     if count is None or ini.getint("KINS", "JOINTS") != count:
-        raise ValueError("Current axes must be XYZ, XYZC or XYZAC")
+        raise ValueError("Current axes must be XYZ, XYZC, XYZAC or XYZBC")
     return count
 
 

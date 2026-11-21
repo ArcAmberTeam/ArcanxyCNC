@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit unified orchestration; Qt and service entry points stay independent."""
+"""Start the configured controller session and supervise its processes."""
 import sys
 
 sys.path.insert(0, "@CMAKE_INSTALL_FULL_LIBDIR@/betterlinuxcnc/python")

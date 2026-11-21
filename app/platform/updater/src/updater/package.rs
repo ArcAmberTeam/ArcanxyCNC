@@ -46,7 +46,7 @@ mod tests {
         let source = directory.path().join("root");
         std::fs::create_dir_all(source.join("DEBIAN")).unwrap();
         std::fs::create_dir_all(source.join("usr/bin")).unwrap();
-        std::fs::write(source.join("DEBIAN/control"), "Package: betterlinuxcnc-qt\nVersion: 1.0\nArchitecture: all\nMaintainer: Test <test@example.invalid>\nDescription: Controlled update boundary fixture\n").unwrap();
+        std::fs::write(source.join("DEBIAN/control"), "Package: betterlinuxcnc\nVersion: 1.0\nArchitecture: all\nMaintainer: Test <test@example.invalid>\nDescription: Controlled update boundary fixture\n").unwrap();
         std::fs::write(source.join("usr/bin/betterlinuxcnc"), "fixture").unwrap();
         let package = directory.path().join("test.deb");
         let build = || {

@@ -44,6 +44,41 @@ class CamHomingTests(unittest.TestCase):
             self.controller.poll()
         self.fail(f"did not reach {command}: {self.vendor.calls}")
 
+    def test_desktop_start_checks_file_before_power_and_runs_after_homing(self):
+        path = "/machine/part.ngc"
+        self.vendor.status.task_state = self.vendor.STATE_OFF
+        self.vendor.status.enabled = False
+        self.vendor.status.file = ""
+        self.assertFalse(self.controller.dispatch("program.home-and-run", {"file": path}))
+        self.assertEqual(self.vendor.calls, [])
+        self.vendor.status.file = path
+        self.assertTrue(self.controller.dispatch("program.home-and-run", {"file": path}))
+        self.assertEqual(self.vendor.calls, [("state", (self.vendor.STATE_ON,))])
+        self.controller.poll()
+        self.assertEqual(len(self.vendor.calls), 1)
+        self.reach("home")
+        self.vendor.confirm(apply=False)
+        self.vendor.status.joint[0]["homing"] = True
+        self.controller.poll()
+        self.assertEqual(self.vendor.calls[-1][0], "home")
+        self.vendor.status.joint[0]["homing"] = False
+        self.reach("auto")
+        self.assertEqual(self.vendor.calls[-1], ("auto", (self.vendor.AUTO_RUN, 0)))
+
+    def test_desktop_start_rejects_estop_and_cancels_if_selected_file_changes(self):
+        path = "/machine/part.ngc"
+        self.vendor.status.file = path
+        self.vendor.status.estop = True
+        self.assertFalse(self.controller.dispatch("program.home-and-run", {"file": path}))
+        self.assertEqual(self.vendor.calls, [])
+        self.vendor.status.estop = False
+        self.assertTrue(self.controller.dispatch("program.home-and-run", {"file": path}))
+        self.reach("home")
+        self.vendor.status.file = "/machine/other.ngc"
+        self.vendor.confirm()
+        self.assertEqual(self.controller.poll()["commandState"], "error")
+        self.assertNotIn("auto", [name for name, _ in self.vendor.calls])
+
     def test_standalone_home_never_loads_and_same_id_never_rehomes(self):
         operation = str(uuid.uuid4())
         self.assertEqual(

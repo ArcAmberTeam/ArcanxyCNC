@@ -13,11 +13,11 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from pathlib import PurePosixPath
 
+from _package_identity import PACKAGE
 from _policy import POLICIES
 
 SNAPSHOTS = "/var/lib/betterlinuxcnc/recovery/snapshots"
 SOURCES = ("/etc/betterlinuxcnc", "/var/lib/betterlinuxcnc/machine")
-PACKAGE = "betterlinuxcnc-qt"
 FORMAT = "betterlinuxcnc-snapshot-v1"
 MAX_BYTES = 64 * 1024 * 1024
 MAX_ENTRIES = 4096
@@ -261,7 +261,7 @@ def _expected(manifest, name):
     version, stamp = manifest["sourceVersion"], manifest["createdUtc"]
     if (
         manifest["format"] != FORMAT
-        or manifest["package"] != PACKAGE
+        or manifest["package"] not in ("betterlinuxcnc", "betterlinuxcnc-qt")
         or not isinstance(version, str)
         or not VERSION.fullmatch(version)
         or not isinstance(stamp, str)

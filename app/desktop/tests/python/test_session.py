@@ -137,17 +137,17 @@ class SessionTests(unittest.TestCase):
         self.assertFalse(json.loads(result.stdout)["serviceConnected"])
 
     def check_connection_cli(self, path):
-        # An invalid Qt platform proves this path never constructs QGuiApplication.
+        # The read-only query must not require a graphical runtime.
         return subprocess.run(
             [
                 sys.executable,
                 "-c",
-                "from bettercnc.desktop import main; raise SystemExit(main())",
+                "from bettercnc.session import main; raise SystemExit(main())",
                 "--check-connection",
                 "--socket",
                 str(path),
             ],
-            env=dict(os.environ, QT_QPA_PLATFORM="no-display-for-readonly-check"),
+            env=dict(os.environ, DISPLAY=""),
             capture_output=True,
             text=True,
             timeout=10,

@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Installed PySide6/QML desktop entry point."""
+"""Launch the installed desktop or query the controller without a display."""
+
 import os
 import sys
 
 sys.path.insert(0, "@CMAKE_INSTALL_FULL_LIBDIR@/betterlinuxcnc/python")
-os.environ.setdefault("BETTERCNC_QML_DIR", "@CMAKE_INSTALL_FULL_DATADIR@/betterlinuxcnc/qml")
 
-from bettercnc.desktop import main
+if "--check-connection" in sys.argv[1:]:
+    from bettercnc.session import main
 
-raise SystemExit(main())
+    raise SystemExit(main())
+
+desktop = "@CMAKE_INSTALL_FULL_LIBDIR@/betterlinuxcnc/desktop/betterlinuxcnc-desktop"
+if not os.path.isfile(desktop):
+    print("Graphical desktop unavailable in this installation. Use --check-connection for status.", file=sys.stderr)
+    raise SystemExit(78)
+os.execv(desktop, [desktop, *sys.argv[1:]])

@@ -12,6 +12,7 @@ from bettercnc_error_records import report
 
 from ._config import AXES, SYSTEMS, Configuration
 from ._files import atomic_write, confined_path, tool_table
+from ._hal_feedback import HalFeedback
 from ._homing_requests import HomingRequests
 from ._received import ACTIVE, ReceivedPrograms
 from ._status import observe, offline
@@ -27,6 +28,7 @@ class _Step:
     sent_at: float = 0.0
     active_result: bool = False
     phase: str | None = None
+    required_file: str | None = None
 
 
 # --------#
@@ -46,6 +48,7 @@ class Controller:
         self._cam_job = None
         self._module = module
         self._clock = clock or time.monotonic
+        self._hal_feedback = HalFeedback(self._clock) if module is None else None
         self._ini_path = ini_path or os.environ.get("INI_FILE_NAME")
         self._stat = self._command = self._error_channel = self._config = None
         self._closed = False
@@ -122,6 +125,8 @@ class Controller:
         self._steps.clear()
         self._jogs.clear()
         self._stat = self._command = self._error_channel = None
+        if self._hal_feedback is not None:
+            self._hal_feedback.close()
         self._snapshot = offline(message)
         self._publish()
 
@@ -149,6 +154,12 @@ class Controller:
             ):
                 self._config = Configuration(self._module, path)
             self._snapshot = observe(self._stat, self._module, self._config)
+            rpm, geometry = (
+                self._hal_feedback.read(self._config.kinematics_model)
+                if self._hal_feedback is not None
+                else (None, {})
+            )
+            self._snapshot.update(spindleFeedbackRpm=rpm, rtcpGeometry=geometry)
             if not self._snapshot["powered"] or self._snapshot["estop"]:
                 self._jogs.clear()
             if self._config.joints and self._config.joints != self._stat.joints:
@@ -165,14 +176,18 @@ class Controller:
                     report("controller", "native_error", str(message), {"action": self._action})
                 if is_error and self._steps:
                     self._result("error", str(message))
-            if self._cam_job and self._cam_job["state"] in ACTIVE:
+            cam_active = self._cam_job and self._cam_job["state"] in ACTIVE
+            if self._steps and (cam_active or self._action == "program.home-and-run"):
+                step = self._steps[0]
+                waiting_for_power = step.guard == "cyclePower"
                 if (
-                    not self._snapshot["powered"]
-                    or self._snapshot["estop"]
-                    or (self._cam_job["state"] != "homing" and not all(self._snapshot["homed"]))
+                    self._snapshot["estop"]
+                    or (not self._snapshot["powered"] and not waiting_for_power)
+                    or (step.required_file and self._snapshot["file"] != step.required_file)
+                    or (step.phase != "homing" and not all(self._snapshot["homed"]))
                 ):
-                    self._result("error", "自动加工联锁已失效，取消未发送步骤")
-                elif self._snapshot["busy"] and self._steps and self._steps[0].method == "auto":
+                    self._result("error", "程序或机床状态已变化，取消后续步骤")
+                elif cam_active and self._snapshot["busy"] and step.method == "auto":
                     if self._cam_job["state"] != "running":
                         self._update_cam(self._cam_job, "running", "加工中")
             if advance:
@@ -190,6 +205,12 @@ class Controller:
             raise ValueError(message)
 
     def _guard(self, name):
+        if name == "cyclePower":
+            s = self._snapshot
+            self._require(s["connected"] and not s["estop"], "请先解除急停")
+            self._require(s["taskState"] in ("off", "estop-reset"), "机床未就绪")
+            self._require(not s["busy"] and not self._jogs, "机床必须空闲")
+            return
         if name == "camHoming":
             self._guard("idle")
             self._require(not self._snapshot["limitOverride"], "CAM 回零禁止限位覆盖")
@@ -263,9 +284,9 @@ class Controller:
     def _step(self, method, *args, guard="connected", expected=None, active_result=False):
         return _Step(method, args, guard, expected, active_result=active_result)
 
-    def _mode_steps(self, mode, guard):
+    def _mode_steps(self, mode, guard, *, force=False):
         self._require(mode in ("manual", "mdi", "auto"), "无效任务模式")
-        if self._snapshot["mode"] == mode:
+        if not force and self._snapshot["mode"] == mode:
             return []
         return [
             self._step(
@@ -276,10 +297,10 @@ class Controller:
             )
         ]
 
-    def _motion_steps(self, mode, guard):
+    def _motion_steps(self, mode, guard, *, force=False):
         self._require(mode in ("joint", "world"), "无效运动模式")
         target = self._constant("TRAJ_MODE_FREE" if mode == "joint" else "TRAJ_MODE_TELEOP")
-        if self._stat.motion_mode == target:
+        if not force and self._stat.motion_mode == target:
             return []
         return [
             self._step(
@@ -333,6 +354,10 @@ class Controller:
             step = self._steps[0]
         try:
             self._guard(step.guard)
+            if step.required_file is not None:
+                self._require(self._snapshot["file"] == step.required_file, "加工程序已变化")
+                if step.method == "auto":
+                    self._require(self._snapshot["mode"] == "auto", "机床未进入自动模式")
             # Only the next confirmed step is sent. No wait_complete is used.
             previous_serial = self._command.serial
             getattr(self._command, step.method)(*step.args)
@@ -445,30 +470,57 @@ class Controller:
         self._require(not self._steps and not self._jogs, "上一条命令尚未完成")
         self._require(not self._cam_job or self._cam_job["state"] not in ACTIVE, "已有 CAM 作业")
 
-    def _cam_home_steps(self, clearance_confirmed):
+    def _cam_home_steps(self, clearance_confirmed, *, power_on=False):
         self._require(clearance_confirmed is True, "必须确认当前装夹下的全部回零路径无干涉")
-        self._guard("idle")
-        self._require(not self._snapshot["limitOverride"], "CAM 回零禁止限位覆盖")
-        self._require(self._snapshot["spindleDirection"] == 0, "CAM 回零要求主轴已停止")
+        enable = power_on and not self._snapshot["powered"]
+        self._guard("cyclePower" if enable else "idle")
+        self._require(not self._snapshot["limitOverride"], "回零禁止限位覆盖")
+        self._require(self._snapshot["spindleDirection"] == 0, "回零要求主轴已停止")
+        self._require(self._config.can_home_all(), self._config.homing_message or "回零配置无效")
         self._require(
             set(self._config.home_all_joints) == set(range(self._stat.joints)),
-            "CAM 回零要求全部 joint 均配置 HOME_SEQUENCE",
+            "自动回零要求全部 joint 均配置 HOME_SEQUENCE",
         )
-        steps = self._plan("machine.home-all", {})
-        # Clear old flags with an acknowledged command before rehoming. A stale
-        # all-homed snapshot must never unlock machining on a repeated home.
-        index = next(i for i, step in enumerate(steps) if step.method == "home")
-        steps.insert(
-            index,
+        steps = []
+        if enable:
+            steps.append(
+                self._step(
+                    "state",
+                    self._constant("STATE_ON"),
+                    guard="cyclePower",
+                    expected=lambda: self._snapshot["powered"],
+                )
+            )
+        steps += self._mode_steps("manual", "camHoming", force=enable)
+        steps += self._motion_steps("joint", "camHoming", force=enable)
+        steps += [
             self._step(
-                "unhome", -1, guard="idle", expected=lambda: not any(self._snapshot["homed"])
+                "unhome", -1, guard="camHoming", expected=lambda: not any(self._snapshot["homed"])
             ),
-        )
+            self._step(
+                "home",
+                -1,
+                guard="camHoming",
+                expected=lambda: all(self._snapshot["homed"]) and not self._snapshot["busy"],
+            ),
+        ]
         for step in steps:
             step.phase = "homing"
-            step.guard = "camHoming"
-            if step.method == "home":
-                step.expected = lambda: all(self._snapshot["homed"]) and not self._snapshot["busy"]
+        return steps
+
+    def _run_file_steps(self, path, *, after_homing):
+        steps = self._mode_steps("auto", "camReady", force=after_homing)
+        steps.append(
+            self._step(
+                "auto",
+                self._constant("AUTO_RUN"),
+                0,
+                guard="camReady",
+                expected=lambda: not self._snapshot["busy"],
+            )
+        )
+        for step in steps:
+            step.required_file = path
         return steps
 
     def homing_status(self, operation_id):
@@ -516,9 +568,11 @@ class Controller:
         clearance_confirmed=False,
         machining_confirmed=False,
         disable_block_delete=False,
+        power_on=False,
     ):
         """Load and run one verified inbox program, with durable at-most-once intent."""
         self._require(type(disable_block_delete) is bool, "disableBlockDelete 必须是布尔值")
+        self._require(type(power_on) is bool and (not power_on or home_first), "无效启动请求")
         self._require(not disable_block_delete or home_first, "仅完整加工可配置跳过标记行")
         previous = self.received_status(transfer_id)
         if previous is not None:
@@ -541,7 +595,9 @@ class Controller:
         try:
             if home_first:
                 self._require(machining_confirmed is True, "必须确认工件坐标、刀具及加工准备")
-                steps = self._cam_home_steps(clearance_confirmed)
+                if power_on and not disable_block_delete:
+                    self._require(not self._snapshot["blockDelete"], "请先关闭跳过标记行")
+                steps = self._cam_home_steps(clearance_confirmed, power_on=power_on)
             else:
                 self._guard("camReady")
                 steps = []
@@ -565,29 +621,7 @@ class Controller:
                     expected=lambda: self._snapshot["file"] == path,
                 )
             ]
-            if home_first:
-                # Homing enters MANUAL even when the initial snapshot was AUTO.
-                steps.append(
-                    self._step(
-                        "mode",
-                        self._constant("MODE_AUTO"),
-                        guard="camReady",
-                        expected=lambda: self._snapshot["mode"] == "auto",
-                    )
-                )
-            else:
-                steps += self._mode_steps("auto", "camReady")
-            # Unlike program.run's acceptance response, this final step waits for
-            # RCS_DONE, empty queues and in-position; idle alone is insufficient.
-            steps.append(
-                self._step(
-                    "auto",
-                    self._constant("AUTO_RUN"),
-                    0,
-                    guard="camReady",
-                    expected=lambda: not self._snapshot["busy"],
-                )
-            )
+            steps += self._run_file_steps(path, after_homing=home_first)
             self._steps = deque(steps)
             self._command_state = "pending"
             self._advance()
@@ -615,6 +649,16 @@ class Controller:
             self._require(not enabled or not s["estop"], "急停未解除，不能开启电源")
             target = self._constant("STATE_ON" if enabled else "STATE_OFF")
             return [self._step("state", target, expected=lambda: self._stat.task_state == target)]
+        if action == "program.home-and-run":
+            path = s["file"]
+            self._require(bool(path), "请先选择加工程序")
+            self._require(payload.get("file") == path, "加工程序已变化，请重新启动")
+            self._cam_idle()
+            self._require(not s["blockDelete"], "自动加工不允许跳过带 / 的程序行")
+            steps = self._cam_home_steps(True, power_on=True)
+            for step in steps:
+                step.required_file = path
+            return steps + self._run_file_steps(path, after_homing=True)
         if action == "program.stop":
             return [self._step("abort", expected=lambda: not self._snapshot["busy"])]
         if action in ("program.run", "program.run-line", "program.step"):
@@ -1023,6 +1067,8 @@ class Controller:
         # Stops are sent once; close never starts or replays another operation.
         self._steps.clear()
         self._closed = True
+        if self._hal_feedback is not None:
+            self._hal_feedback.close()
         self._stat = self._command = self._error_channel = None
         self._snapshot = offline("控制器已关闭")
         self._publish()
@@ -1046,6 +1092,18 @@ class Controller:
             "program.stop": connected,
             "jog.stop": connected,
             "spindle.stop": connected,
+            "program.home-and-run": connected
+            and free
+            and not s["busy"]
+            and not self._jogs
+            and not s["estop"]
+            and (s["powered"] or s["taskState"] in ("off", "estop-reset"))
+            and bool(s["file"])
+            and home_all_ready
+            and len(self._config.home_all_joints) == self._config.joints
+            and not s["limitOverride"]
+            and s["spindleDirection"] == 0
+            and not s["blockDelete"],
             "program.run": homed_idle and bool(s["file"]) and free,
             "program.run-line": homed_idle and bool(s["file"]) and free,
             "program.step": ready and bool(s["file"]) and (homed_idle or s["paused"]) and free,

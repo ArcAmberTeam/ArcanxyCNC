@@ -59,7 +59,7 @@ def rename(source, destination, **kwargs):
     return real_rename(source, destination, **kwargs)
 
 def command(args, **kwargs):
-    assert args == ['/usr/bin/dpkg-query', '-W', '-f=${Version}', 'betterlinuxcnc-qt']
+    assert args == ['/usr/bin/dpkg-query', '-W', '-f=${Version}', 'betterlinuxcnc']
     assert kwargs['env'] == {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'}
     commands.append(args)
     return SimpleNamespace(stdout=options.get('version', '26.10.26.1'), returncode=0)
@@ -153,7 +153,7 @@ class BackupTests(unittest.TestCase):
         manifest = json.loads((snapshot / "manifest.json").read_text())
         self.assertEqual(manifest["sourceVersion"], "26.10.26.1")
         self.assertEqual(manifest["format"], "betterlinuxcnc-snapshot-v1")
-        self.assertEqual(manifest["package"], "betterlinuxcnc-qt")
+        self.assertEqual(manifest["package"], "betterlinuxcnc")
         self.assertEqual(snapshot.name, manifest["createdUtc"] + "-26.10.26.1")
         self.assertEqual(result["files"], len(self.files))
         self.assertEqual(

@@ -45,8 +45,8 @@ def info(descriptor):
     return os.stat_result(values)
 def run(arguments, **kwargs):
     assert arguments[:3] == ['/usr/bin/dpkg-query', '-W', '-f=${Version}']
-    assert arguments[3] in ('linuxcnc-uspace', 'linuxcnc-uspace-dev', 'betterlinuxcnc-qt')
-    return SimpleNamespace(stdout='26.10.26.1' if arguments[3] == 'betterlinuxcnc-qt' else version)
+    assert arguments[3] in ('linuxcnc-uspace', 'linuxcnc-uspace-dev', 'betterlinuxcnc')
+    return SimpleNamespace(stdout='26.10.26.1' if arguments[3] == 'betterlinuxcnc' else version)
 def stop_accounts(_name):
     raise ValueError('ABI verified; account boundary reached')
 os.open, os.fstat, os.geteuid = opened, info, lambda: int(euid)

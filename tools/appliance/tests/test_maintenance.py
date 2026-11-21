@@ -195,7 +195,9 @@ class MaintenanceTests(unittest.TestCase):
             "cat /etc/shadow",
             "$(id)",
             "pa manage sudo",
+            "pa manage sudo open",
             "pa manage sudo open extra",
+            "sudo /usr/bin/id",
         ):
             result = subprocess.run(
                 [sys.executable, "-I", str(SCRIPT)],
@@ -244,34 +246,6 @@ class MaintenanceTests(unittest.TestCase):
                     ["pa", "manage", target],
                     {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
                 )
-
-    def test_sudo_routes_literal_arguments_to_the_expiring_system_policy(self):
-        for request, executable, arguments, path in (
-            (
-                "pa manage sudo open",
-                "/usr/bin/pa",
-                ["pa", "manage", "sudo", "open"],
-                "/usr/bin:/bin",
-            ),
-            (
-                "sudo /usr/bin/printf '%s' '$(id); text'",
-                "/usr/bin/sudo",
-                ["sudo", "/usr/bin/printf", "%s", "$(id); text"],
-                "/usr/sbin:/usr/bin:/sbin:/bin",
-            ),
-        ):
-            with (
-                patch.object(sys, "argv", [str(SCRIPT)]),
-                patch.dict(os.environ, {"SSH_ORIGINAL_COMMAND": request}),
-                patch.object(
-                    maintenance.os, "execve", side_effect=SystemExit(0)
-                ) as execute,
-                self.assertRaises(SystemExit),
-            ):
-                maintenance.main()
-            execute.assert_called_once_with(
-                executable, arguments, {"PATH": path, "LANG": "C.UTF-8"}
-            )
 
 
 if __name__ == "__main__":

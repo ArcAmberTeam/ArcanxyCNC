@@ -173,7 +173,11 @@ pub(super) fn validate_version(value: &str) -> Result<()> {
 pub(super) fn installed_version(fallback: &str) -> Result<String> {
     validate_version(fallback)?;
     let output = super::command("/usr/bin/dpkg-query")
-        .args(["--show", "--showformat=${Version}", PACKAGE])
+        .args([
+            "--show",
+            "--showformat=${Version}",
+            betterlinuxcnc_local_update::installed_package(),
+        ])
         .output()?;
     if output.status.success() {
         let value = String::from_utf8(output.stdout)?;

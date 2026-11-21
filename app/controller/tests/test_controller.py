@@ -1,9 +1,11 @@
 """Exercise the public controller against the external LinuxCNC API contract."""
 
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from bettercnc_controller import Controller, StatusReader
 
@@ -315,6 +317,50 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(s["maxVelocityLimit"], 40)
         self.assertEqual(s["jogMaxVelocity"], 20)
         self.assertEqual(self.vendor.calls, [])
+
+    def test_spindle_feedback_requires_a_writer_and_converts_revolutions_per_second(self):
+        hal = Mock(error=RuntimeError)
+        self.vendor.status.spindle[0]["speed"] = 1200
+        with patch.dict(sys.modules, {"linuxcnc": self.vendor, "hal": hal}):
+            controller = Controller(clock=self.clock)
+            try:
+                hal.pin_has_writer.return_value = False
+                self.assertIsNone(controller.poll()["spindleFeedbackRpm"])
+                hal.get_value.assert_not_called()
+                hal.pin_has_writer.return_value = True
+                for rps, rpm in ((-10.5, 630.0), (0.0, 0.0), (float("nan"), None)):
+                    hal.get_value.return_value = rps
+                    observed = controller.poll()
+                    self.assertEqual(observed["spindleFeedbackRpm"], rpm)
+                    self.assertEqual(observed["spindleSpeed"], 1200)
+                hal.get_value.assert_called_with("spindle.0.speed-in")
+                self.vendor.available = False
+                self.assertIsNone(controller.poll()["spindleFeedbackRpm"])
+                hal.component.return_value.exit.assert_called_once()
+            finally:
+                controller.close()
+
+    def test_table_offsets_use_the_loaded_model_and_its_live_tool_pin(self):
+        model = "xyzbc-trt-kins"
+        self.vendor.ini_values[("KINS", "KINEMATICS")] = model
+        hal = Mock(error=RuntimeError)
+        hal.pin_has_writer.return_value = False
+        pins = {model + ".x-offset": -3.5, model + ".tool-offset": 42.0}
+
+        def read_pin(pin):
+            if pin not in pins:
+                raise NameError(pin)
+            return pins[pin]
+
+        hal.get_value.side_effect = read_pin
+        with patch.dict(sys.modules, {"linuxcnc": self.vendor, "hal": hal}):
+            controller = Controller(clock=self.clock)
+            try:
+                snapshot = controller.poll()
+                self.assertEqual(snapshot["rtcpGeometry"], {"offsetX": -3.5, "toolLength": 42.0})
+                self.assertIsNone(snapshot["spindleFeedbackRpm"])
+            finally:
+                controller.close()
 
     def test_snapshots_do_not_expose_mutable_internal_state(self):
         s = self.controller.snapshot

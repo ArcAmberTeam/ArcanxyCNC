@@ -13,12 +13,13 @@ chmod 755 /usr/sbin/policy-rc.d
 apt-get update
 mapfile -t native_packages < .github/ci/native/packages.txt
 apt-get install -y --no-install-recommends \
-  "${native_packages[@]}" cmake curl
+  "${native_packages[@]}" cmake curl xz-utils ca-certificates
+bash .github/ci/setup-desktop-node.sh
 curl --fail --silent --show-error --location --retry 3 \
   https://sh.rustup.rs --output /tmp/rustup-init.sh
 sh /tmp/rustup-init.sh -y --no-modify-path --default-toolchain none
 export PATH="/root/.cargo/bin:$PATH"
-for module in app/platform/cam-link app/platform/updater app/platform/mesa-update app/platform/manage-ini app/platform/account-management/cnc-maint app/platform/package-build app/platform/local-update app/platform/error-records; do
+for module in app/platform/cam-link app/platform/updater app/platform/mesa-update app/platform/configuration/manage-ini app/platform/configuration/account-management/cnc-maint app/platform/package-build app/platform/local-update app/platform/error-records app/platform/system-info; do
   version=$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["toolchain"]["channel"])' "$module/rust-toolchain.toml")
   rustup toolchain install "$version" --profile minimal --component rustfmt --component clippy
 done
@@ -32,8 +33,9 @@ cmake --build /tmp/application-build --parallel 2
 cpack --config /tmp/application-build/CPackConfig.cmake -G DEB -B /tmp/packages
 packages=(/tmp/packages/*.deb)
 [[ ${#packages[@]} == 1 && -f ${packages[0]} ]]
+python3 .github/ci/build-rename-bridge.py "${packages[0]}"
 python3 .github/ci/verify-deb-install.py "${packages[0]}" /workspace
-cp "${packages[0]}" /output/
+cp /tmp/packages/*.deb /output/
 cd /output
 sha256sum ./*.deb | sed 's|  \./|  |' > SHA256SUMS
 printf '%s\n' "$BUILD_SHA" > SOURCE_COMMIT

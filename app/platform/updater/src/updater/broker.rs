@@ -188,7 +188,9 @@ fn apply_locked(store: &Store) -> Result<()> {
     if !output.status.success() {
         return Err("安装失败；控制系统保持停止，请管理员检查系统更新日志".into());
     }
-    if storage::installed_version("0")? != staged.version {
+    if betterlinuxcnc_local_update::installed_package() != super::PACKAGE
+        || storage::installed_version("0")? != staged.version
+    {
         return Err("安装后版本核验不符；控制系统保持停止".into());
     }
     betterlinuxcnc_local_update::clear_origin()?;
@@ -219,9 +221,20 @@ fn install_with_backup(
         return Err(format!("创建更新前备份失败，未安装更新：{}", detail.trim()).into());
     }
     let mut install = super::command("/usr/bin/apt-get");
-    install
-        .args(["--yes", "--no-remove", "--reinstall", "install"])
-        .arg(package);
+    install.arg("--yes");
+    if betterlinuxcnc_local_update::installed_package() == super::PACKAGE {
+        install.arg("--no-remove");
+    } else {
+        install.args([
+            "-o",
+            "DPkg::Pre-Install-Pkgs::=/usr/lib/betterlinuxcnc/rename-apt-guard",
+            "-o",
+            "DPkg::Tools::Options::/usr/lib/betterlinuxcnc/rename-apt-guard::Version=2",
+            "-o",
+            "Dpkg::Options::=--force-confold",
+        ]);
+    }
+    install.args(["--reinstall", "install"]).arg(package);
     Ok(execute(&mut install)?)
 }
 

@@ -85,9 +85,9 @@ def run(args, **kwargs):
         groups['cnc-logs'] = {'gid': 986, 'members': []}
     elif args[0] == '/usr/sbin/useradd':
         name = args[-1]
-        assert name in ('linuxcnc', 'cnc-maint') and name not in users
+        assert name in ('linuxcnc', 'cnc-maint', 'cnc_admin') and name not in users
         assert '--no-create-home' in args and '--password' not in args
-        uid = 1100 if name == 'linuxcnc' else 1101
+        uid = {'linuxcnc': 1100, 'cnc-maint': 1101, 'cnc_admin': 1102}[name]
         users[name] = {'uid': uid, 'gid': uid, 'home': args[args.index('--home-dir') + 1],
             'shell': args[args.index('--shell') + 1], 'password': '!'}
         groups[name] = {'gid': uid, 'members': []}
@@ -184,6 +184,7 @@ class ProvisionTests(unittest.TestCase):
             "var/lib/betterlinuxcnc": [0, 0, 0o755],
             "var/lib/betterlinuxcnc/home": [1100, 1100, 0o700],
             "var/lib/betterlinuxcnc/maintenance": [0, 1101, 0o750],
+            "var/lib/betterlinuxcnc/admin": [1102, 1102, 0o700],
             "var/lib/betterlinuxcnc/programs": [1100, 1100, 0o700],
             "var/lib/betterlinuxcnc/inbox": [1100, 1100, 0o700],
             "var/lib/betterlinuxcnc/machine": [1100, 1100, 0o700],
@@ -197,6 +198,7 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(result["memberships"]["cnc-maint"], ["cnc-logs"])
         self.assertEqual(result["users"]["linuxcnc"]["password"], "!")
         self.assertEqual(result["users"]["cnc-maint"]["password"], "!")
+        self.assertEqual(result["users"]["cnc_admin"]["password"], "!")
         self.assertFalse(
             any(command[0].endswith("systemctl") for command in result["commands"])
         )
@@ -248,7 +250,7 @@ class ProvisionTests(unittest.TestCase):
         names = (
             "usr/lib/betterlinuxcnc",
             "usr/share/betterlinuxcnc",
-            "usr/share/doc/betterlinuxcnc-qt",
+            "usr/share/doc/betterlinuxcnc",
         )
         for name in names:
             path = self.root / name

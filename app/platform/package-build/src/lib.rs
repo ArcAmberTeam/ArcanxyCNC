@@ -141,9 +141,12 @@ fn package_file(name: &str) -> Result<File> {
     Ok(file)
 }
 fn build() -> Result<()> {
+    if Path::new("/usr/share/betterlinuxcnc/package-rename").is_file() {
+        return Err("Complete the official package rename before building a local package".into());
+    }
     let source = checkout()?;
     let installed = process("/usr/bin/dpkg-query")
-        .args(["-W", "-f=${Version}", "betterlinuxcnc-qt"])
+        .args(["-W", "-f=${Version}", "betterlinuxcnc"])
         .stdout(Stdio::piped())
         .output()?;
     if !installed.status.success() {
@@ -155,8 +158,8 @@ fn build() -> Result<()> {
         "cam-link",
         "updater",
         "mesa-update",
-        "manage-ini",
-        "account-management/cnc-maint",
+        "configuration/manage-ini",
+        "configuration/account-management/cnc-maint",
         "package-build",
         "local-update",
         "error-records",
@@ -172,7 +175,7 @@ fn build() -> Result<()> {
 import hashlib, json, pathlib, subprocess
 module = pathlib.Path('/usr/lib/linuxcnc/modules/zhulong_homing.so')
 record = json.loads(pathlib.Path('/usr/share/betterlinuxcnc/homing/provenance.json').read_text())
-version = subprocess.check_output(['/usr/bin/dpkg-query', '-W', '-f=${Version}', 'betterlinuxcnc-qt'], text=True)
+version = subprocess.check_output(['/usr/bin/dpkg-query', '-W', '-f=${Version}', 'betterlinuxcnc'], text=True)
 assert hashlib.sha256(module.read_bytes()).hexdigest() == record['sha256'], 'Installed homing module hash differs'
 assert record['application_version'] == version, 'Installed homing provenance version differs'
 "#]))?;
@@ -228,7 +231,7 @@ assert record['application_version'] == version, 'Installed homing provenance ve
         .stdout(Stdio::piped())
         .output()?;
     let installed = process("/usr/bin/dpkg-query")
-        .args(["-W", "-f=${Version}", "betterlinuxcnc-qt"])
+        .args(["-W", "-f=${Version}", "betterlinuxcnc"])
         .stdout(Stdio::piped())
         .output()?;
     if !built.status.success()

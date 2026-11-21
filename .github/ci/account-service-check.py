@@ -1,6 +1,8 @@
 """Exercise the real socket-activated account service on an isolated hosted runner."""
 import json
 import os
+import pty
+import re
 from pathlib import Path
 import pwd
 import secrets
@@ -19,7 +21,7 @@ def run(*args, **kwargs):
 def main():
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.geteuid() != 0:
         raise RuntimeError("Only run in the isolated GitHub hosted job")
-    for name in ("linuxcnc", "cnc-maint"):
+    for name in ("linuxcnc", "cnc-maint", "cnc_admin"):
         try:
             pwd.getpwnam(name)
         except KeyError:
@@ -29,6 +31,8 @@ def main():
     run("useradd", "--user-group", "--no-create-home", "--shell", "/bin/sh", "linuxcnc")
     run("useradd", "--user-group", "--no-create-home", "--shell", "/bin/sh",
         "--home-dir", "/var/lib/betterlinuxcnc/maintenance", "cnc-maint")
+    run("useradd", "--user-group", "--no-create-home", "--shell", "/bin/sh",
+        "--home-dir", "/var/lib/betterlinuxcnc/admin", "cnc_admin")
     root = Path("/var/lib/betterlinuxcnc")
     root.mkdir(mode=0o755)
     Path("/etc/betterlinuxcnc").mkdir(mode=0o755)
@@ -36,7 +40,11 @@ def main():
     helper.parent.mkdir(parents=True)
     shutil.copyfile(sys.argv[1], helper)
     helper.chmod(0o755)
+    previous_sudo = Path("/etc/betterlinuxcnc/cnc-maint-sudo")
+    previous_sudo.write_text("cnc-maint ALL=(ALL:ALL) NOTAFTER=20990101000000Z NOPASSWD: ALL\n")
+    previous_sudo.chmod(0o440)
     run(str(helper), "provision")
+    assert "NOPASSWD: ALL" not in previous_sudo.read_text()
     build_unit = Path("/usr/lib/systemd/system/betterlinuxcnc-cnc-maint-build@.service")
     expected_unit = build_unit.read_text()
     build_unit.write_text(expected_unit.replace("AmbientCapabilities=CAP_SETUID CAP_SETGID\n", ""))
@@ -95,66 +103,89 @@ with socket.socket(socket.AF_UNIX) as connection:
         installer.unlink()
 
 
-def verify_sudo_access(helper, password):
-    """Exercise real PAM, sudo expiry and systemd cleanup through the public CLI."""
-    fixture = Path("/etc/sudoers.d/cnc-maint-ci")
-    if fixture.exists():
-        raise RuntimeError("Refuse to replace an existing sudo fixture")
-    fixture.write_text(
-        "@include /etc/betterlinuxcnc/cnc-maint-sudo\n"
-        f"Defaults!{helper} timestamp_timeout=0, !rootpw, !targetpw, !runaspw\n"
-        f"cnc-maint ALL=(root) PASSWD: {helper} sudo-open\n"
-    )
-    fixture.chmod(0o440)
-    policy = Path("/etc/betterlinuxcnc/cnc-maint-sudo")
-    timer = "betterlinuxcnc-cnc-maint-sudo-expire.timer"
+def verify_sudo_access(helper, maintenance_password):
+    """Check the same local CLI, socket, PAM and sudo policy used by the desktop."""
+    sudoers = Path("/etc/sudoers")
+    original = sudoers.read_bytes()
+    policy = Path("/etc/betterlinuxcnc/cnc-admin-sudo")
+    admin_password = secrets.token_urlsafe(32)
 
-    def sudo(*args, secret="", ok=True):
+    def issue(allowed=True):
+        master, terminal = pty.openpty()
+        try:
+            result = subprocess.run([str(helper), "issue-admin-code"], stdout=terminal,
+                                    stderr=subprocess.DEVNULL, timeout=10)
+            assert (result.returncode == 0) == allowed
+            if allowed:
+                code = os.read(master, 128).decode().strip()
+                assert re.fullmatch(r"[0-9A-F]{4}(?:-[0-9A-F]{4}){7}", code)
+                return code
+        finally:
+            os.close(master)
+            os.close(terminal)
+
+    def setup_required():
+        reply = run("runuser", "-u", "linuxcnc", "--", str(helper), "request", "admin-setup-required")
+        return json.loads(reply.stdout)["setupRequired"]
+
+    def switch(op, password="", allowed=True, caller="linuxcnc"):
         result = subprocess.run(
-            ["runuser", "-u", "cnc-maint", "--", "sudo", *args],
-            input=secret, capture_output=True, text=True, timeout=30,
+            ["runuser", "-u", caller, "--", str(helper), "request", f"admin-sudo-{op}"],
+            input=password, capture_output=True, text=True, timeout=30,
         )
-        assert (result.returncode == 0) == ok, result.stderr
-        assert password not in result.stdout + result.stderr
-        return result
+        assert (result.returncode == 0) == allowed
+        assert all(secret not in result.stdout + result.stderr for secret in password.splitlines() if secret)
+        return json.loads(result.stdout)["enabled"] if allowed else None
+
+    def elevate(allowed):
+        result = subprocess.run(
+            ["runuser", "-u", "cnc_admin", "--", "sudo", "-S", "-k", "/usr/bin/id", "-u"],
+            input=admin_password + "\n", capture_output=True, text=True, timeout=30,
+        )
+        assert (result.returncode == 0 and result.stdout.strip() == "0") == allowed
 
     try:
-        # Validate our fixture and its include without imposing file-mode rules
-        # on the hosted runner's pre-existing administrator sudoers fragment.
-        run("visudo", "-c", "-f", str(fixture))
-        sudo("-n", "/usr/bin/id", "-u", ok=False)
-        sudo("-S", "-k", str(helper), "sudo-open", secret="incorrect-ci-password\n", ok=False)
-        assert "NOPASSWD: ALL" not in policy.read_text()
-        sudo("-S", "-k", str(helper), "sudo-open", secret=password + "\n")
-        assert sudo("-n", "/usr/bin/id", "-u").stdout.strip() == "0"
-        run("systemctl", "is-active", "--quiet", timer)
-        configured = run("systemctl", "show", timer, "-p", "TimersMonotonic", "--value").stdout
-        assert "OnActiveUSec=15min" in configured, configured
-        # A wildcard grant must never make opening/renewal passwordless.
-        sudo("-n", "-k", str(helper), "sudo-open", ok=False)
-        sudo("-S", "-k", str(helper), "sudo-open", secret="incorrect-ci-password\n", ok=False)
-        run("systemctl", "start", "betterlinuxcnc-cnc-maint-sudo-expire.service")
-        sudo("-n", "/usr/bin/id", "-u", ok=False)
-        # Native sudo refuses the deadline independently of the cleanup service.
-        policy.write_text("cnc-maint ALL=(ALL:ALL) NOTAFTER=20000101000000Z NOPASSWD: ALL\n")
-        sudo("-n", "/usr/bin/id", "-u", ok=False)
-        sudo("-S", "-k", str(helper), "sudo-open", secret=password + "\n")
-        run("systemctl", "start", "betterlinuxcnc-cnc-maint-sudo-reset.service")
-        sudo("-n", "/usr/bin/id", "-u", ok=False)
-        sudo("-S", "-k", str(helper), "sudo-open", secret=password + "\n")
+        previous_code = issue()
+        code = issue()
+        assert code != previous_code
+        switch("enable", admin_password, allowed=False)  # Host policy not activated yet.
+        with sudoers.open("ab") as stream:
+            stream.write(f"\n@include {policy}\n".encode())
+        run("visudo", "-c", "-f", str(sudoers))
+        assert switch("status") is False
+        assert setup_required() is True
+        switch("enroll", f"{previous_code}\n{admin_password}", allowed=False)
+        switch("enroll", f"{code}\n{admin_password}", allowed=False, caller="nobody")
+        run(str(helper), "provision")  # An update must preserve an unused code.
+        switch("enable", maintenance_password, allowed=False)
+        switch("enable", admin_password, caller="nobody", allowed=False)
+        elevate(False)
+        assert switch("enroll", f"{code}\n{admin_password}") is True
+        assert setup_required() is False
+        issue(allowed=False)
+        elevate(True)
+        run(str(helper), "disable")
+        assert switch("status") is True
         run(str(helper), "provision")
-        sudo("-n", "/usr/bin/id", "-u", ok=False)
-        # A failed timer startup must leave the grant closed.
-        run("systemctl", "stop", timer)
-        run("systemctl", "mask", "--runtime", timer)
-        sudo("-S", "-k", str(helper), "sudo-open", secret=password + "\n", ok=False)
-        sudo("-n", "/usr/bin/id", "-u", ok=False)
-        print("Fresh PAM authentication, 900-second timer, native sudo expiry, reset and fail-closed activation passed")
+        assert switch("status") is True
+        switch("disable", maintenance_password, allowed=False)
+        assert switch("status") is True
+        assert switch("disable", admin_password) is False
+        switch("enroll", f"{code}\n{secrets.token_urlsafe(32)}", allowed=False)
+        assert switch("enable", admin_password) is True
+        assert switch("disable", admin_password) is False
+        elevate(False)
+        assert switch("status") is False
+        # Upgrade an existing password-based installation without an enrollment record.
+        Path("/var/lib/betterlinuxcnc/cnc-admin-enrollment").unlink()
+        run(str(helper), "provision")
+        assert setup_required() is False
+        issue(allowed=False)
+        assert switch("enable", admin_password) is True
+        assert switch("disable", admin_password) is False
+        print("Persistent admin sudo, independent PAM authentication and immediate revocation passed")
     finally:
-        run(str(helper), "sudo-close")
-        run("systemctl", "unmask", "--runtime", timer)
-        run("systemctl", "stop", timer)
-        fixture.unlink()
+        sudoers.write_bytes(original)
 
 
 if __name__ == "__main__":

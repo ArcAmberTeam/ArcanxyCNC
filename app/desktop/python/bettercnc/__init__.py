@@ -1,4 +1,4 @@
-"""Native QML desktop and explicit LinuxCNC capability boundaries."""
+"""Application metadata and headless LinuxCNC session boundaries."""
 
 __version__ = "26.11.05.1"
 

@@ -8,7 +8,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-SUDO_ACCESS = """@include /etc/betterlinuxcnc/cnc-maint-sudo
+SUDO_ACCESS = "@include /etc/betterlinuxcnc/cnc-admin-sudo\n"
+LEGACY_SUDO_ACCESS = """@include /etc/betterlinuxcnc/cnc-maint-sudo
 Defaults!/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account timestamp_timeout=0, !rootpw, !targetpw, !runaspw
 cnc-maint ALL=(root) PASSWD: /usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account sudo-open
 """
@@ -249,6 +250,7 @@ def upgrade_maintenance(root=Path("/")):
             legacy[name],
             POLICIES[name],
             POLICIES[name].replace(SUDO_ACCESS, ""),
+            POLICIES[name].replace(SUDO_ACCESS, LEGACY_SUDO_ACCESS),
         ):
             return "unrecognized policy preserved"
         previous.append(

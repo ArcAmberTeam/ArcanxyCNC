@@ -26,7 +26,7 @@ esac
 TREES = (
     "usr/lib/betterlinuxcnc",
     "usr/share/betterlinuxcnc",
-    "usr/share/doc/betterlinuxcnc-qt",
+    "usr/share/doc/betterlinuxcnc",
 )
 FILES = {
     "usr/bin/pa",
@@ -45,7 +45,7 @@ FILES = {
     "usr/lib/systemd/system/betterlinuxcnc-mesa-update.timer",
     "usr/lib/systemd/system/betterlinuxcnc-mesa-flash.service",
     "usr/share/polkit-1/rules.d/49-betterlinuxcnc-update.rules",
-    "usr/share/applications/betterlinuxcnc-qt.desktop",
+    "usr/share/applications/betterlinuxcnc.desktop",
     "usr/share/xsessions/betterlinuxcnc-kiosk.desktop",
     "etc/xdg/autostart/betterlinuxcnc-autostart.desktop",
     "etc/betterlinuxcnc/updater.json",

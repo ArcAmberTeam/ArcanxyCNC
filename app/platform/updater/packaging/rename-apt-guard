@@ -1,0 +1,29 @@
+#!/usr/bin/python3 -I
+"""Permit APT to remove only the retired package during the identity change."""
+
+import sys
+
+
+def permits(lines):
+    if next(lines, "").rstrip() != "VERSION 2":
+        return False
+    for line in lines:
+        if line == "\n":
+            break
+    else:
+        return False
+    for line in lines:
+        fields = line.rstrip("\n").split(" ", 4)
+        if len(fields) != 5:
+            return False
+        package, _, direction, new_version, action = fields
+        if new_version == "-" or action in ("**REMOVE**", "**PURGE**"):
+            if package != "betterlinuxcnc-qt" or action != "**REMOVE**":
+                return False
+        elif direction == ">" or not (action == "**CONFIGURE**" or action.startswith("/")):
+            return False
+    return True
+
+
+if __name__ == "__main__":
+    sys.exit(0 if permits(sys.stdin) else "Unexpected APT plan for the package rename")

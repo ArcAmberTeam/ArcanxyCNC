@@ -16,6 +16,7 @@ class Configuration:
         self.joints = int(self.number("KINS", "JOINTS", 0))
         self.joint_map = {}
         kinematics = self.get("KINS", "KINEMATICS") or ""
+        self.kinematics_model = next(iter(kinematics.split()), None)
         # Only trivkins defines a known Cartesian-to-joint mapping. A Cartesian
         # axis name is never used as a guessed joint index for other kinematics.
         if kinematics.split()[:1] == ["trivkins"]:
@@ -207,6 +208,7 @@ class Configuration:
     def snapshot(self):
         return {
             "iniPath": self.path,
+            "kinematicsModel": self.kinematics_model,
             "parameterFile": self.file("RS274NGC", "PARAMETER_FILE"),
             "toolTablePath": self.file("EMCIO", "TOOL_TABLE"),
             "programPrefix": self.file("DISPLAY", "PROGRAM_PREFIX"),

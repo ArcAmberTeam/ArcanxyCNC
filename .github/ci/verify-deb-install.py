@@ -35,9 +35,9 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-def validate_deb_paths(package, source):
+def validate_deb_paths(package, source, validator=None):
     """Apply the root broker's exact archive contract before APT or postinst."""
-    validator = source / "app/platform/updater/src/updater/package_members.py"
+    validator = validator or source / "app/platform/updater/src/updater/package_members.py"
     for kind, option in (("data", "--fsys-tarfile"), ("control", "--ctrl-tarfile")):
         with tempfile.TemporaryFile() as errors:
             process = subprocess.Popen(
@@ -75,6 +75,9 @@ def ownership(path, user, group, mode, directory=True):
 def accounts_and_paths():
     operator = pwd.getpwnam("linuxcnc")
     maintenance = pwd.getpwnam("cnc-maint")
+    admin = pwd.getpwnam("cnc_admin")
+    require(admin.pw_uid >= 1000 and os.getgrouplist("cnc_admin", admin.pw_gid) == [admin.pw_gid], "Unexpected administrator groups")
+    ownership("/var/lib/betterlinuxcnc/admin", "cnc_admin", "cnc_admin", 0o700)
     require(operator.pw_uid >= 1000 and maintenance.pw_uid >= 1000, "Invalid account UID")
     require(operator.pw_dir == "/var/lib/betterlinuxcnc/home", "Invalid operator HOME")
     require(maintenance.pw_dir == "/var/lib/betterlinuxcnc/maintenance", "Invalid maintenance HOME")
@@ -196,7 +199,7 @@ def verify_snapshot(path, version, expected_files, expected_directories):
         "Unexpected snapshot manifest schema",
     )
     require(manifest["format"] == "betterlinuxcnc-snapshot-v1", "Snapshot format mismatch")
-    require(manifest["package"] == "betterlinuxcnc-qt", "Snapshot package mismatch")
+    require(manifest["package"] == "betterlinuxcnc", "Snapshot package mismatch")
     require(manifest["sourceVersion"] == version, "Snapshot installed version mismatch")
     stamp = manifest["createdUtc"]
     datetime.datetime.strptime(stamp, "%Y%m%dT%H%M%S%fZ")
@@ -248,7 +251,13 @@ def verify_snapshot(path, version, expected_files, expected_directories):
 
 def verify_installed_backup(version, policies):
     snapshots = Path("/var/lib/betterlinuxcnc/recovery/snapshots")
-    require(not snapshots.exists(), "Expected a fresh CI snapshot store")
+    previous = [path for path in snapshots.iterdir() if path.is_dir()]
+    require(len(previous) == 1, "Expected the backup made before the package rename")
+    historical = previous[0]
+    original = (historical / "manifest.json").read_bytes()
+    metadata = json.loads(original)
+    require((metadata["package"], metadata["sourceVersion"]) == ("betterlinuxcnc-qt", version),
+            "Migration lost the original snapshot identity")
     sources = [Path("/etc/betterlinuxcnc"), Path("/var/lib/betterlinuxcnc/machine")]
     expected_directories = {str(source) for source in sources}
     expected_directories.update(
@@ -263,7 +272,7 @@ def verify_installed_backup(version, policies):
             path.read_bytes(), (stat.S_IMODE(info.st_mode), info.st_uid, info.st_gid)
         )
     password = password_digest()
-    created = []
+    created = [historical]
     legacy = {}
     for attempt in range(4):
         result = json.loads(run("/usr/sbin/betterlinuxcnc-appliance", "backup", timeout=30).stdout)
@@ -290,7 +299,9 @@ def verify_installed_backup(version, policies):
             if path.name not in {".lock", "legacy-before-demo"}
         }
         require(present == set(created[-3:]), "Backup retention did not keep exactly the latest three")
-        for path in present:
+        if historical in present:
+            require((historical / "manifest.json").read_bytes() == original, "Migration rewrote the original snapshot")
+        for path in present - {historical}:
             verify_snapshot(path, version, expected, expected_directories)
         for marker, content in legacy.items():
             require(marker.read_bytes() == content, "Backup retention changed legacy data")
@@ -457,11 +468,70 @@ def verify_maintenance_workspace(package, source, version):
     state = json.loads(run("betterlinuxcnc-updater", "status", env={"PATH":"/usr/bin:/bin", "HOME":"/root"}).stdout)
     require(state["self_compiled"] is False, "Official origin did not clear")
     # Missing machine context must refuse the explicit upload before installation.
-    before = run("dpkg-query", "-W", "-f=${Version}", "betterlinuxcnc-qt").stdout
+    before = run("dpkg-query", "-W", "-f=${Version}", "betterlinuxcnc").stdout
     result = subprocess.run(["betterlinuxcnc-updater", "maintenance-install"], stdin=built[0].open("rb"), capture_output=True)
     require(result.returncode != 0, "Local installation ran without a managed controller context")
-    require(run("dpkg-query", "-W", "-f=${Version}", "betterlinuxcnc-qt").stdout == before, "Rejected installation changed package state")
+    require(run("dpkg-query", "-W", "-f=${Version}", "betterlinuxcnc").stdout == before, "Rejected installation changed package state")
     print("Installed maintenance CLI built a same-version DEB as cnc-maint; archive, retained HOMEMOD, origin and preflight refusal verified")
+
+
+def verify_package_rename(package, source, version):
+    bridge = package.with_name(f"betterlinuxcnc-qt_{version}_amd64.deb")
+    require(run("dpkg-deb", "-f", bridge, "Package").stdout.strip() == "betterlinuxcnc-qt",
+            "Existing updater cannot identify the migration package")
+    with tempfile.TemporaryDirectory() as temp:
+        validator = Path(temp) / "legacy_package_members.py"
+        policy = (source / "app/platform/updater/src/updater/package_members.py").read_bytes()
+        policy = policy.replace(b'usr/share/doc/betterlinuxcnc"', b'usr/share/doc/betterlinuxcnc-qt"')
+        policy = policy.replace(b'usr/share/applications/betterlinuxcnc.desktop', b'usr/share/applications/betterlinuxcnc-qt.desktop')
+        require(hashlib.sha256(policy).hexdigest() == "e1b971ce3f6982ad32ab84d1e53f8aba2c24d420180c982a7dcd8ee121a2c67d",
+                "Migration fixture must match the shipped legacy archive validator")
+        validator.write_bytes(policy)
+        validate_deb_paths(bridge, source, validator)
+    # Seed an older dpkg identity with a locally edited conffile. Its updater
+    # would select only the old-name release asset checked above.
+    config = Path("/etc/betterlinuxcnc/updater.json")
+    with tempfile.TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        tree = directory / "old"
+        control = tree / "DEBIAN"
+        control.mkdir(parents=True)
+        (control / "control").write_text(
+            f"Package: betterlinuxcnc-qt\nVersion: {version}~previous\nArchitecture: amd64\n"
+            "Maintainer: CI <ci@invalid.invalid>\nDescription: Prior application identity fixture\n"
+        )
+        (control / "conffiles").write_text(str(config) + "\n")
+        previous = tree / config.relative_to("/")
+        previous.parent.mkdir(parents=True)
+        previous.write_bytes((source / "app/platform/updater/packaging/updater.json").read_bytes())
+        fixture = directory / "previous.deb"
+        run("dpkg-deb", "--build", tree, fixture)
+        run("dpkg", "--install", fixture)
+    modified = config.read_bytes() + b"\n"
+    config.write_bytes(modified)
+    # dpkg preserves directory modes during upgrades. Older manual installations
+    # used group-writable application roots; provisioning must protect them.
+    for name in ("/usr/lib/betterlinuxcnc", "/usr/share/betterlinuxcnc", "/usr/share/doc/betterlinuxcnc-qt"):
+        path = Path(name)
+        path.mkdir(parents=True, exist_ok=True)
+        path.chmod(0o775)
+    run("apt-get", "--yes", "--no-remove", "--no-install-recommends", "install", str(bridge))
+    guard = "/usr/lib/betterlinuxcnc/rename-apt-guard"
+    refused = subprocess.run([guard], input="VERSION 2\n\nlinuxcnc-uspace 2.9 > - **REMOVE**\n", text=True)
+    require(refused.returncode != 0, "Rename allowed an unrelated removal")
+    require(config.read_bytes() == modified, "Bridge upgrade overwrote the existing conffile")
+    require(run("dpkg-query", "-W", "-f=${Version}", "betterlinuxcnc-qt").stdout == version,
+            "The old package identity did not upgrade to the bridge release")
+    run("/usr/sbin/betterlinuxcnc-appliance", "backup")
+    run("apt-get", "--yes", "--no-install-recommends", "-o", f"DPkg::Pre-Install-Pkgs::={guard}",
+        "-o", f"DPkg::Tools::Options::{guard}::Version=2", "-o", "Dpkg::Options::=--force-confold", "--reinstall", "install", str(package))
+    require(config.read_bytes() == modified, "Package rename overwrote the existing conffile")
+    require(not Path("/usr/share/betterlinuxcnc/package-rename").exists(), "Bridge marker survived migration")
+    require(run("dpkg-query", "-S", "/usr/bin/betterlinuxcnc-updater").stdout.startswith("betterlinuxcnc: "),
+            "The canonical package must own the installed updater")
+    status = subprocess.run(["dpkg-query", "-W", "-f=${db:Status-Status}", "betterlinuxcnc-qt"],
+                            capture_output=True, text=True)
+    require(status.stdout != "installed", "The former package is still installed")
 
 
 def verify_interrupted_mesa_check():
@@ -502,8 +572,8 @@ def main():
     package, source = map(Path, sys.argv[1:])
     version = tomllib.loads((source / "app/desktop/pyproject.toml").read_text())["project"]["version"]
     fields = {field: run("dpkg-deb", "--field", str(package), field).stdout.strip() for field in ("Package", "Version", "Architecture")}
-    require(fields == {"Package": "betterlinuxcnc-qt", "Version": version, "Architecture": "amd64"}, "Incorrect package metadata")
-    require(package.name == f"betterlinuxcnc-qt_{version}_amd64.deb", "Incorrect package filename")
+    require(fields == {"Package": "betterlinuxcnc", "Version": version, "Architecture": "amd64"}, "Incorrect package metadata")
+    require(package.name == f"betterlinuxcnc_{version}_amd64.deb", "Incorrect package filename")
     validate_deb_paths(package, source)
     with tempfile.TemporaryDirectory() as temporary:
         control = Path(temporary)
@@ -511,14 +581,13 @@ def main():
         require({item.name for item in control.iterdir()} <= {"control", "md5sums", "conffiles", "postinst"}, "Unexpected control file")
         require((control / "postinst").read_bytes() == (source / "tools/appliance/packaging/postinst").read_bytes(), "Unexpected postinst bytes")
         require(stat.S_IMODE((control / "postinst").stat().st_mode) == 0o755, "postinst must be executable")
-    # dpkg preserves directory modes during upgrades. Older manual installations
-    # used group-writable application roots; provisioning must protect them.
-    for name in ("/usr/lib/betterlinuxcnc", "/usr/share/betterlinuxcnc", "/usr/share/doc/betterlinuxcnc-qt"):
-        path = Path(name)
-        path.mkdir(parents=True, exist_ok=True)
-        path.chmod(0o775)
-    run("apt-get", "install", "-y", "--no-install-recommends", str(package))
-    for name in ("/usr/lib/betterlinuxcnc", "/usr/share/betterlinuxcnc", "/usr/share/doc/betterlinuxcnc-qt"):
+    verify_package_rename(package, source, version)
+    desktop = Path("/usr/lib/betterlinuxcnc/desktop")
+    for name in ("betterlinuxcnc-desktop", "chrome_crashpad_handler"):
+        ownership(str(desktop / name), "root", "root", 0o755, directory=False)
+    ownership(str(desktop / "resources/app.asar"), "root", "root", 0o644, directory=False)
+    require(not (desktop / "chrome-sandbox").exists(), "Unexpected setuid sandbox helper")
+    for name in ("/usr/lib/betterlinuxcnc", "/usr/share/betterlinuxcnc", "/usr/share/doc/betterlinuxcnc"):
         ownership(name, "root", "root", 0o755)
     verify_xsession_entry()
     for name, directory in (
@@ -545,6 +614,12 @@ def main():
         require(Path("/usr/bin", executable).read_bytes().startswith(b"\x7fELF"), "Expected a real Linux Rust binary")
         run(f"/usr/bin/{executable}", "--help")
     installed_version = run("/usr/bin/python3", "-c", "import sys; sys.path.insert(0, '/usr/lib/betterlinuxcnc/python'); from bettercnc import __version__; print(__version__)").stdout.strip()
+    system_info = "/usr/lib/betterlinuxcnc/system-info/betterlinuxcnc-system-info"
+    ownership(system_info, "root", "root", 0o755, directory=False)
+    snapshot = json.loads(run("/usr/sbin/runuser", "-u", "linuxcnc", "--", system_info, "--json").stdout)
+    require(snapshot["schemaVersion"] == 1, "System information schema mismatch")
+    require(snapshot["kernel"] == Path("/proc/sys/kernel/osrelease").read_text().strip(), "System information must report the running kernel")
+    require(snapshot["cpu"]["logicalCores"] > 0 and snapshot["memory"]["totalBytes"] > 0, "Missing real host information")
     require(installed_version == version, "Installed application version mismatch")
     verify_installed_homing(source, version)
     verify_interrupted_mesa_check()
@@ -599,7 +674,7 @@ def main():
     ssh_policy = Path("/etc/ssh/sshd_config")
     sudo_policy = Path("/etc/sudoers")
     ssh_policy.write_text(ssh_policy.read_text().replace("PermitTTY yes", "PermitTTY no"))
-    sudo_policy.write_text("\n".join(line for line in sudo_policy.read_text().split("\n") if "pa-config" not in line and "cnc-maint-sudo" not in line and "cnc-maint-account" not in line))
+    sudo_policy.write_text("\n".join(line for line in sudo_policy.read_text().split("\n") if "pa-config" not in line and "cnc-admin-sudo" not in line and "cnc-maint-account" not in line))
     run("dpkg", "--force-confold", "--install", str(package))
     require(password_digest() == password, "Maintenance policy migration changed credentials")
     require(list(Path("/var/lib/betterlinuxcnc/recovery").glob("*-pa-policy/policies.json")), "Missing pre-PA policy recovery")
@@ -615,8 +690,7 @@ def main():
     require(sudo_rules == [
         "root ALL=(ALL:ALL) ALL",
         'cnc-maint ALL=(root) NOPASSWD: /usr/lib/betterlinuxcnc/manage-ini/pa-config ""',
-        '@include /etc/betterlinuxcnc/cnc-maint-sudo',
-        'cnc-maint ALL=(root) PASSWD: /usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account sudo-open',
+        '@include /etc/betterlinuxcnc/cnc-admin-sudo',
     ], "Unexpected ordinary-user sudo rule or include")
     require("#include" not in Path("/etc/sudoers").read_text(), "Unexpected sudoers include")
     for account in ("linuxcnc", "cnc-maint"):
@@ -633,10 +707,8 @@ def main():
         )
     verify_installed_backup(version, policies)
     verify_pa_configuration()
-    ownership("/etc/betterlinuxcnc/cnc-maint-sudo", "root", "root", 0o440, directory=False)
-    require("NOPASSWD: ALL" not in Path("/etc/betterlinuxcnc/cnc-maint-sudo").read_text(), "Package opened sudo authorization")
-    denied = subprocess.run(["runuser", "-u", "cnc-maint", "--", "sudo", "-n", "-k", "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account", "sudo-open"], capture_output=True, text=True)
-    require(denied.returncode != 0 and "password" in denied.stderr.lower(), "Sudo activation did not require fresh authentication")
+    ownership("/etc/betterlinuxcnc/cnc-admin-sudo", "root", "root", 0o440, directory=False)
+    require("PASSWD: ALL" not in Path("/etc/betterlinuxcnc/cnc-admin-sudo").read_text(), "Package opened admin sudo")
     print("DEB metadata, Rust binaries, provisioning, data retention, PA configuration, SSH/sudo and private backup rotation passed")
 
 

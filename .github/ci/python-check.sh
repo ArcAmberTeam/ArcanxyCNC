@@ -30,10 +30,9 @@ case "$scope" in
     ;;
   desktop)
     package=app/desktop
-    paths=(app/desktop/python app/desktop/tests/python app/desktop/scripts app/desktop/app/main.py app/desktop/setup.py)
+    paths=(app/desktop/python app/desktop/tests/python app/desktop/scripts app/desktop/app/main.py)
     tests=('test_*.py')
     test_dir=app/desktop/tests/python
-    export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QT_QUICK_CONTROLS_STYLE=Basic
     ;;
   *) echo "Unknown Python CI scope: $scope" >&2; exit 2 ;;
 esac
