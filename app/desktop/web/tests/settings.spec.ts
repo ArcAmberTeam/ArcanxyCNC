@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import applicationVersion from '../../../../versions/version.json'
+import applicationVersion from '../../../../versions/version.json' with { type: 'json' }
 
 test('first activation sets a password, later sudo changes use the existing password', async ({ page }) => {
   await page.addInitScript(() => {

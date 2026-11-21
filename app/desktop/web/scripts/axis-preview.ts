@@ -5,7 +5,7 @@ import { open } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { profileLayouts, type AxisCount } from '../bridge'
+import { profileLayouts, type AxisCount } from '../bridge.ts'
 import { fileURLToPath } from 'node:url'
 import type { Plugin } from 'vite'
 

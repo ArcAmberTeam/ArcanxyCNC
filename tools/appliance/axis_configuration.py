@@ -40,8 +40,10 @@ def parse_ini(text):
 def axis_count(text):
     ini = parse_ini(text)
     coordinates = "".join(ini.get("TRAJ", "COORDINATES").split()).upper()
-    count = 5 if coordinates == "XYZBC" else next(
-        (count for count, axes in AXES.items() if axes == coordinates), None
+    count = (
+        5
+        if coordinates == "XYZBC"
+        else next((count for count, axes in AXES.items() if axes == coordinates), None)
     )
     if count is None or ini.getint("KINS", "JOINTS") != count:
         raise ValueError("Current axes must be XYZ, XYZC, XYZAC or XYZBC")

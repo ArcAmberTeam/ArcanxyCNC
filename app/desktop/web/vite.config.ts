@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite'
-import { axisPreview } from './scripts/axis-preview'
+import { axisPreview } from './scripts/axis-preview.ts'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
-import applicationVersion from '../../../versions/version.json'
+import applicationVersion from '../../../versions/version.json' with { type: 'json' }
 
 if (applicationVersion.schema_version !== 1 || !/^\d+\.\d+\.\d+\.\d+-(dev|release)$/.test(applicationVersion.version)) {
   throw new Error('Expected a four-part application version ending in -dev or -release')
