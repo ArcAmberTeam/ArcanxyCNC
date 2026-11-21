@@ -145,14 +145,20 @@ def verify_maintenance_account():
         return json.loads(result.stdout) if success else None
     try:
         require(request("status")["enabled"] is False, "Disabled account status lost")
-        require(request("enable", secrets.token_urlsafe(32))["enabled"] is True, "Enabling failed")
+        request("enable", secrets.token_urlsafe(32), success=False)
+        run(helper, "enable", input=secrets.token_urlsafe(32))
+        require(request("status")["enabled"] is True, "Installer could not provision maintenance credentials")
         before = password_digest()
-        require(request("enable", secrets.token_urlsafe(32))["enabled"] is True, "Changing password failed")
+        request("enable", secrets.token_urlsafe(32), success=False)
+        request("disable", success=False)
+        require(password_digest() == before, "Operator replaced the bootstrap credential")
+        run(helper, "enable", input=secrets.token_urlsafe(32))
         require(password_digest() != before, "Password did not change")
         before = password_digest()
         run(helper, "provision")
         require(password_digest() == before, "Repeat provisioning revoked the new password")
-        require(request("disable")["enabled"] is False, "Disabling failed")
+        run(helper, "disable")
+        require(request("status")["enabled"] is False, "Installer could not revoke maintenance access")
         fields = next(line.split(":") for line in Path("/etc/shadow").read_text().splitlines() if line.startswith("cnc-maint:"))
         require(fields[1] == "!" and fields[7] == "1", "Disable kept credentials or account validity")
         for account in ("cnc-maint", "nobody"):
