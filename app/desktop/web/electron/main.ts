@@ -61,6 +61,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('axis-profile:status', event => { authorize(event); return axisProfileStatus() })
   ipcMain.handle('axis-profile:request', (event, count: unknown) => { authorize(event); return requestAxisProfile(count) })
   ipcMain.handle('control:state', event => { authorize(event); return controller.state })
+  ipcMain.handle('control:home-all', (event, confirmed: unknown) => { authorize(event); return controller.homeAll(confirmed) })
   ipcMain.handle('control:flood', (event, enabled: unknown) => { authorize(event); return controller.setFlood(enabled) })
   ipcMain.handle('control:spindle', (event, direction: unknown, rpm?: unknown) => { authorize(event); return controller.setSpindle(direction, rpm) })
   ipcMain.handle('control:feed', (event, ratio: unknown) => { authorize(event); return controller.setFeedOverride(ratio) })

@@ -8,12 +8,13 @@ import AxisConfigSelect from './AxisConfigSelect.vue'
 import { previewFiles } from './axis-preview'
 import AxisParameterForm from './AxisParameterForm.vue'
 
-const props = defineProps<{ bridge?: AxisProfileBridge; readings: MachineReadings | null }>()
+const props = defineProps<{ bridge?: AxisProfileBridge; readings: MachineReadings | null; previewCount?: AxisCount }>()
+const emit = defineEmits<{ previewSelect: [count: AxisCount] }>()
 const files = computed(() => props.bridge ?? previewFiles)
 const counts = [3, 4, 5] as const
 const labels = { 3: '三轴', 4: '四轴', 5: '五轴' }
 const status = ref<AxisProfileStatus | null>(null)
-const selection = ref<AxisCount | null>(null)
+const selection = ref<AxisCount | null>(props.previewCount ?? null)
 const fetching = ref(false)
 const submitting = ref(false)
 const error = ref('')
@@ -70,7 +71,11 @@ async function refresh() {
 }
 async function select(count: AxisCount) {
   if (saving.value || fetching.value || submitting.value || pending.value) return
-  if (!props.bridge) { selection.value = count; return }
+  if (!props.bridge) {
+    selection.value = count
+    emit('previewSelect', count)
+    return
+  }
   const profile = status.value?.profiles.find(p => p.axis_count === count)
   if (!status.value || !profile) return
   selection.value = count

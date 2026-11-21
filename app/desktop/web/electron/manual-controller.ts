@@ -26,6 +26,7 @@ export class ManualController {
   private generation = 0
   private held = false
   private starting = false
+  private submittingHome = false
   private stopping?: Promise<void>
   private polling = false
   private nextConnect = 0
@@ -71,6 +72,7 @@ export class ManualController {
       serviceConnected: true, connected: data.connected,
       readings: machineReadings(data, capabilities),
       canJog: !reason && capabilities['jog.start'] === true && !this.held && !this.starting && !this.stopping,
+      canHomeAll: data.connected && capabilities['machine.power-and-home'] === true && !this.held,
       programFile: data.connected && typeof data.file === 'string' ? data.file : null,
       canStartCycle: data.connected && capabilities['program.home-and-run'] === true,
       canEstop: data.connected && capabilities['machine.estop'] === true,
@@ -116,8 +118,8 @@ export class ManualController {
     if ((this.held || this.starting) && (!this.fresh() || this.now() - this.sampledAt >= 500)) {
       void this.stop()
     }
-    if (this.now() - this.sampledAt >= 500 && (this.state.canJog || this.state.readings || this.state.programFile !== null)) {
-      this.state = { ...this.state, readings: null, activeAxes: null, axes: {}, programFile: null, canStartCycle: false, canJog: false, canEstop: false, reason: '机床状态已过期，等待更新' }
+    if (this.now() - this.sampledAt >= 500 && (this.state.canJog || this.state.canHomeAll || this.state.readings || this.state.programFile !== null)) {
+      this.state = { ...this.state, readings: null, activeAxes: null, axes: {}, programFile: null, canStartCycle: false, canJog: false, canHomeAll: false, canEstop: false, reason: '机床状态已过期，等待更新' }
       this.emit()
     }
   }
@@ -138,7 +140,7 @@ export class ManualController {
     const generation = ++this.generation
     this.held = true
     this.starting = true
-    this.state = { ...this.state, canJog: false, jogging: true, error: '' }
+    this.state = { ...this.state, canJog: false, canHomeAll: false, jogging: true, error: '' }
     this.emit()
     try {
       const result = await this.transport.request('command.execute', {
@@ -208,6 +210,16 @@ export class ManualController {
       () => this.state.canStartCycle && this.state.programFile === file)
   }
 
+  async homeAll(confirmed: unknown) {
+    if (confirmed !== true) throw new Error('请先确认回零路径无遮挡')
+    if (this.submittingHome) throw new Error('回零请求正在提交')
+    this.submittingHome = true
+    try {
+      await this.sendControl('machine.power-and-home', { clearanceConfirmed: true },
+        () => this.state.canHomeAll && !this.starting && !this.stopping)
+    } finally { this.submittingHome = false }
+  }
+
   async setSpindle(direction: unknown, rpm?: unknown) {
     if (direction === 0 && rpm === undefined) {
       await this.sendControl('spindle.stop', {}, () => this.state.readings?.canStopSpindle === true)
@@ -235,7 +247,7 @@ export class ManualController {
     })
   }
 
-  private async sendControl(action: 'program.home-and-run' | 'coolant.flood' | 'override.feed' | 'spindle.forward' | 'spindle.reverse' | 'spindle.stop', payload: Record<string, unknown>, allowed: () => boolean) {
+  private async sendControl(action: 'machine.power-and-home' | 'program.home-and-run' | 'coolant.flood' | 'override.feed' | 'spindle.forward' | 'spindle.reverse' | 'spindle.stop', payload: Record<string, unknown>, allowed: () => boolean) {
     const generation = this.generation
     const current = () => this.transport.connected && this.fresh() && this.now() - this.sampledAt < 500
       && (action === 'spindle.stop' || (generation === this.generation && !this.held)) && allowed()

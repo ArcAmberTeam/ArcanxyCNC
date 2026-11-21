@@ -8,6 +8,7 @@ declare global {
 export function useControllerConnection() {
   const state = shallowRef(offlineState('机床未连接'))
   const error = shallowRef('')
+  const submittingHome = shallowRef(false)
   const bridge = window.cncControl
   let unsubscribe: (() => void) | undefined
   let timer: ReturnType<typeof setInterval> | undefined
@@ -40,6 +41,14 @@ export function useControllerConnection() {
     error.value = ''
     try { await bridge.emergencyStop() }
     catch (problem) { error.value = problem instanceof Error ? problem.message : String(problem) }
+  }
+  async function homeAll(confirmed: true) {
+    if (!bridge || !state.value.canHomeAll || submittingHome.value) return
+    submittingHome.value = true
+    error.value = ''
+    try { bridge.heartbeat(); await bridge.homeAll(confirmed) }
+    catch (problem) { error.value = problem instanceof Error ? problem.message : String(problem) }
+    finally { submittingHome.value = false }
   }
   async function setMachineControl(setting: 'flood' | 'feed', value: boolean | number) {
     if (!bridge) return
@@ -78,5 +87,5 @@ export function useControllerConnection() {
     document.removeEventListener('visibilitychange', hidden)
   })
   return { state: readonly(state), error: readonly(error), start, stop, chooseProgram, startCycle, emergencyStop,
-    setMachineControl, setSpindle, axisProfiles: window.cncAxisProfiles }
+    setMachineControl, setSpindle, homeAll, submittingHome: readonly(submittingHome), axisProfiles: window.cncAxisProfiles }
 }

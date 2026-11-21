@@ -1,21 +1,48 @@
 <script setup lang="ts">
 // 手动控制页，包含机床概览、移动控制和轴配置入口。
 // Manual Control page with the machine overview, jog controls, and axis configuration.
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { ChevronLeft, ChevronRight } from '@lucide/vue'
 import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { SidebarMenuButton } from '@/components/ui/sidebar'
-import { jogAxes, type AxisProfileBridge, type ControlState, type JogAxis, type JogDirection, type JogRequest } from '../../../bridge'
+import { jogAxes, type AxisCount, type AxisProfileBridge, type ControlState, type JogAxis, type JogDirection, type JogRequest } from '../../../bridge'
 import AxisJogPad from './AxisJogPad.vue'
 import { previewFiles } from './axis-preview'
 import AxisConfigurationPanel from './AxisConfigurationPanel.vue'
 import MachineStatusCards from './MachineStatusCards.vue'
 
-const props = defineProps<{ state: ControlState; error: string; profiles?: AxisProfileBridge }>()
-const emit = defineEmits<{ start: [request: JogRequest]; stop: []; spindle: [direction: -1 | 0 | 1, rpm?: number]; flood: [enabled: boolean]; feed: [ratio: number] }>()
+const props = defineProps<{ state: ControlState; error: string; profiles?: AxisProfileBridge; submittingHome: boolean }>()
+const emit = defineEmits<{ start: [request: JogRequest]; stop: []; home: [confirmed: true]; spindle: [direction: -1 | 0 | 1, rpm?: number]; flood: [enabled: boolean]; feed: [ratio: number] }>()
 const showAxes = ref(false)
 const showConfiguration = ref(false)
-const displayedAxes = computed(() => jogAxes.filter(axis => props.state.activeAxes?.some(item => item.name === axis)))
+const browserPreview = !!previewFiles && !window.cncControl
+const confirmHoming = ref(false)
+watch(() => props.state.canHomeAll, () => { confirmHoming.value = false })
+function confirmHome() {
+  if (!confirmHoming.value || !props.state.canHomeAll || props.submittingHome) return
+  confirmHoming.value = false
+  emit('home', true)
+}
+const previewCount = ref<AxisCount>(5)
+const previewAxes = ref<JogAxis[]>([])
+watchEffect(async onCleanup => {
+  if (!previewFiles || window.cncControl || props.profiles || showConfiguration.value) return
+  let current = true
+  onCleanup(() => { current = false })
+  previewAxes.value = []
+  try {
+    const { values } = await previewFiles.read(previewCount.value)
+    if (current) previewAxes.value = jogAxes.filter(axis => values.axes?.includes(axis))
+  } catch {
+    // Without a readable preset the browser has no axis layout to show.
+  }
+})
+const displayedAxes = computed(() => {
+  const active = props.state.activeAxes
+  return active ? jogAxes.filter(axis => active.some(item => item.name === axis)) : previewAxes.value
+})
 const xy = computed(() => displayedAxes.value.filter(axis => axis === 'X' || axis === 'Y'))
 const rotaryAxes = computed(() => displayedAxes.value.filter(axis => 'ABC'.includes(axis)))
 const rotaryPads = computed(() => {
@@ -46,9 +73,9 @@ onUnmounted(() => emit('stop'))
       </span>
 
       <div v-if="!showAxes && !showConfiguration" class="overview-controls">
-        <MachineStatusCards v-if="state.readings" :readings="state.readings" :axes="displayedAxes"
+        <MachineStatusCards :readings="state.readings" :axes="displayedAxes"
           @spindle="(direction, rpm) => emit('spindle', direction, rpm)" @flood="emit('flood', $event)" @feed="emit('feed', $event)" />
-        <div class="overview-motion text-base font-semibold" :class="{ 'self-start': !state.readings }">
+        <div class="overview-motion text-base font-semibold">
           <Card as="button" type="button" :disabled="!displayedAxes.length" @click="showAxes = true">
             <span>移动控制</span><ChevronRight class="size-5 shrink-0" aria-hidden="true" />
           </Card>
@@ -69,9 +96,23 @@ onUnmounted(() => emit('stop'))
         <SidebarMenuButton v-if="profiles || previewFiles" type="button" variant="workspace" class="h-10 w-auto px-4" @click="showConfiguration = true">
           <span>轴配置</span><ChevronRight aria-hidden="true" />
         </SidebarMenuButton>
+        <Dialog v-model:open="confirmHoming">
+          <DialogTrigger as-child>
+            <Button type="button" variant="outline" class="ml-auto" :disabled="submittingHome || (!state.canHomeAll && !browserPreview)">回零</Button>
+          </DialogTrigger>
+          <DialogContent class="sm:max-w-sm" :show-close-button="false">
+            <DialogTitle>确认回零</DialogTitle>
+            <DialogDescription>请确认各轴回零路径无遮挡，人员已离开运动范围。确认后，机床将自动使能并按配置顺序回零。</DialogDescription>
+            <DialogFooter>
+              <DialogClose as-child><Button type="button" variant="outline">取消</Button></DialogClose>
+              <Button type="button" :disabled="!state.canHomeAll || submittingHome" @click="confirmHome">确认无遮挡并回零</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <AxisConfigurationPanel v-if="showConfiguration" :bridge="profiles" :readings="state.readings" />
+      <AxisConfigurationPanel v-if="showConfiguration" :bridge="profiles" :readings="state.readings"
+        :preview-count="previewFiles && !profiles ? previewCount : undefined" @preview-select="previewCount = $event" />
       <div v-else-if="!showAxes" class="flex min-w-0 items-center justify-center p-4">
         <img
           src="./five-axis-cnc.png"

@@ -86,6 +86,51 @@ class HomingPolicyTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
+    def test_confirmed_manual_home_waits_for_power_and_only_homes_configured_joints(self):
+        vendor = six_joint_vendor()
+        vendor.status.enabled = False
+        vendor.status.task_state = vendor.STATE_OFF
+        vendor.status.file = ""
+        controller = Controller(module=vendor)
+        action = "machine.power-and-home"
+        self.assertTrue(controller.poll()["capabilities"][action])
+        for clearance in (None, False, 1, "true"):
+            self.assertFalse(controller.dispatch(action, {"clearanceConfirmed": clearance}))
+        self.assertEqual(vendor.calls, [])
+        self.assertTrue(controller.dispatch(action, {"clearanceConfirmed": True}))
+        self.assertFalse(controller.poll()["capabilities"][action])
+        self.assertEqual(vendor.calls, [("state", (vendor.STATE_ON,))])
+        vendor.confirm(apply=False)
+        controller.poll()
+        self.assertEqual(len(vendor.calls), 1)
+        for method in ("mode", "teleop_enable", "home"):
+            vendor.confirm()
+            controller.poll()
+            self.assertEqual(vendor.calls[-1][0], method)
+        self.assertEqual(vendor.calls[-1][1], (-1,))
+        vendor.confirm(apply=False)
+        vendor.status.homed[:3] = [1, 1, 1]
+        self.assertEqual(controller.poll()["commandState"], "completed")
+        self.assertEqual(len(vendor.calls), 4)
+
+    def test_manual_home_obeys_estop_before_and_after_enabling(self):
+        vendor = FakeLinuxCNC()
+        vendor.status.enabled = False
+        vendor.status.task_state = vendor.STATE_OFF
+        vendor.status.estop = True
+        controller = Controller(module=vendor)
+        action = "machine.power-and-home"
+        confirmed = {"clearanceConfirmed": True}
+        self.assertFalse(controller.poll()["capabilities"][action])
+        self.assertFalse(controller.dispatch(action, confirmed))
+        self.assertEqual(vendor.calls, [])
+        vendor.status.estop = False
+        self.assertTrue(controller.dispatch(action, confirmed))
+        vendor.confirm()
+        vendor.status.estop = True
+        self.assertEqual(controller.poll()["commandState"], "error")
+        self.assertEqual(vendor.calls, [("state", (vendor.STATE_ON,))])
+
     def test_home_all_finishes_when_only_configured_xyz_finish(self):
         vendor = six_joint_vendor()
         controller = Controller(module=vendor)

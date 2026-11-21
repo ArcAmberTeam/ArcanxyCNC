@@ -3,6 +3,7 @@ import type { AdminSudoBridge, AxisProfileBridge, ControlBridge, ControlState, J
 
 const bridge: ControlBridge = {
   getState: () => ipcRenderer.invoke('control:state'),
+  homeAll: confirmed => ipcRenderer.invoke('control:home-all', confirmed),
   setFlood: enabled => ipcRenderer.invoke('control:flood', enabled),
   setSpindle: (direction, rpm) => ipcRenderer.invoke('control:spindle', direction, rpm),
   setFeedOverride: ratio => ipcRenderer.invoke('control:feed', ratio),

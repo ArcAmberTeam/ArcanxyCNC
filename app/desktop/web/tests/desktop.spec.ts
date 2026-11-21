@@ -10,10 +10,11 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
   const commands: Array<{ action: string; payload: Record<string, unknown> }> = []
   const sockets = new Set<net.Socket>()
   let jogging = false
+  let powered = false
   const snapshot = () => ({
-    connected: true, axes: ['X', 'Y', 'Z'], motionMode: 'world', powered: true, estop: false,
+    connected: true, axes: ['X', 'Y', 'Z'], motionMode: 'world', powered, estop: false,
     linearUnits: 1, angularUnits: 1, commandState: 'idle',
-    capabilities: { 'jog.start': !jogging, 'machine.estop': true },
+    capabilities: { 'jog.start': powered && !jogging, 'machine.power-and-home': !jogging, 'machine.estop': true },
     axisLimits: Object.fromEntries(['X', 'Y', 'Z'].map(name => [name, { maxVelocity: 10 }])),
   })
   const server = net.createServer(socket => {
@@ -29,6 +30,7 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
         let result: unknown = snapshot()
         if (request.method === 'command.execute') {
           commands.push(request.params)
+          if (request.params.action === 'machine.power-and-home') powered = true
           if (request.params.action === 'jog.start') jogging = true
           if (['jog.stop', 'machine.estop'].includes(request.params.action)) jogging = false
           result = { accepted: true, snapshot: snapshot() }
@@ -51,6 +53,17 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
     await page.bringToFront()
     await page.getByRole('button', { name: '控制', exact: true }).click()
     await page.getByRole('button', { name: /^移动控制/ }).click()
+    const home = page.getByRole('button', { name: '回零', exact: true })
+    const confirmation = page.getByRole('dialog', { name: '确认回零' })
+    await home.click()
+    await expect(confirmation).toBeVisible()
+    await confirmation.getByRole('button', { name: '取消' }).click()
+    expect(commands).toEqual([])
+    await home.click()
+    await confirmation.getByRole('button', { name: '确认无遮挡并回零' }).click()
+    await expect.poll(() => commands.slice()).toEqual([
+      { action: 'machine.power-and-home', payload: { clearanceConfirmed: true } },
+    ])
     const button = page.getByRole('button', { name: 'X 轴正向' })
     await expect(button).toBeEnabled()
     await expect(page.getByRole('button', { name: 'B 轴正向' })).toHaveCount(0)
