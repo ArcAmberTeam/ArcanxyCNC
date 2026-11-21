@@ -153,15 +153,17 @@ def write(path, text, mode=0o644):
             os.unlink(temporary)
 
 
-def register_kiosk_display():
-    """Publish boot defaults without restarting the active graphical session."""
+def register_appliance_defaults():
+    """Register the packaged kiosk and system sleep policies."""
     sources = Path("/usr/lib/betterlinuxcnc/appliance/packaging")
     generator = sources / "betterlinuxcnc-display-generator"
     if not generator.is_file():
         return
-    # Deliver both files in the private package tree accepted by older updaters.
-    # Publish the seat configuration before making the generator discoverable.
+    # Older updaters accept these files under the private appliance package tree.
+    sleep_directory = Path("/usr/lib/systemd/sleep.conf.d")
+    sleep_directory.mkdir(mode=0o755, exist_ok=True)
     for name, directory in (
+        ("90-betterlinuxcnc-sleep.conf", sleep_directory),
         ("90-betterlinuxcnc.conf", "/usr/share/lightdm/lightdm.conf.d"),
         (generator.name, "/usr/lib/systemd/system-generators"),
     ):
@@ -172,7 +174,7 @@ def register_kiosk_display():
         except FileExistsError:
             if not destination.is_symlink() or destination.readlink() != source:
                 raise ValueError(
-                    f"Conflicting kiosk display integration: {destination}"
+                    f"Conflicting appliance policy: {destination}"
                 ) from None
 
 

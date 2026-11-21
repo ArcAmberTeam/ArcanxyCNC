@@ -14,6 +14,8 @@ install(DIRECTORY templates/
 install(FILES packaging/90-betterlinuxcnc.conf
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/appliance/packaging")
 if(BETTERCNC_BUILD_SYSTEM_SERVICES)
+    install(FILES packaging/90-betterlinuxcnc-sleep.conf
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/appliance/packaging")
     install(PROGRAMS packaging/betterlinuxcnc-display-generator
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/betterlinuxcnc/appliance/packaging")
     configure_file(packaging/betterlinuxcnc-axis-profile@.service.in

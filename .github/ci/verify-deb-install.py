@@ -170,6 +170,13 @@ def verify_maintenance_account():
         endpoint.unlink(missing_ok=True)
 
 
+def verify_sleep_policy():
+    config = configparser.ConfigParser(interpolation=None, strict=False)
+    config.read_string(run("systemd-analyze", "cat-config", "systemd/sleep.conf").stdout)
+    for key in ("AllowSuspend", "AllowHibernation", "AllowHybridSleep", "AllowSuspendThenHibernate"):
+        require(not config.getboolean("Sleep", key, fallback=True), f"System sleep mode is enabled: {key}")
+
+
 def verify_xsession_entry():
     """Let Debian's real argument parser resolve the installed LightDM entry."""
     with tempfile.TemporaryDirectory() as directory:
@@ -616,6 +623,7 @@ def main():
     for name in ("/usr/lib/betterlinuxcnc", "/usr/share/betterlinuxcnc", "/usr/share/doc/betterlinuxcnc"):
         ownership(name, "root", "root", 0o755)
     verify_xsession_entry()
+    verify_sleep_policy()
     for name, directory in (
         ("betterlinuxcnc-axis-profile@.service", "/usr/lib/systemd/system"),
         ("00-betterlinuxcnc-axis-settings.rules", "/usr/share/polkit-1/rules.d"),
@@ -685,6 +693,7 @@ def main():
     policies = json.loads(run("/usr/sbin/betterlinuxcnc-appliance", "plan").stdout)["policyFiles"]
     previous = {name: Path(name).read_bytes() if Path(name).is_file() else None for name in policies}
     run("dpkg", "--force-confold", "--install", str(package))
+    verify_sleep_policy()
     require(accounts_and_paths() == identities, "Repeated install changed account identities")
     require(password_digest() == password, "Repeated install changed maintenance credentials")
     for name, content in fixtures.items():
