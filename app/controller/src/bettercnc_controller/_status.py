@@ -44,6 +44,8 @@ def offline(message):
         "rapidOverride": None,
         "spindleOverride": None,
         "spindleSpeed": None,
+        "spindleFeedbackRpm": None,
+        "rtcpGeometry": {},
         "spindleDirection": None,
         "spindleBrake": None,
         "flood": None,

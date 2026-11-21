@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::{io::Write, path::Path};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-const PACKAGE: &str = "betterlinuxcnc-qt";
+const PACKAGE: &str = "betterlinuxcnc";
 const REPOSITORY: &str = "ArcAmberTeam/ArcanxyCNC";
 
 #[derive(Parser)]
@@ -49,6 +49,8 @@ enum Action {
     AxisMaintenance {
         #[arg(value_parser = clap::value_parser!(u8).range(3..=5))]
         axes: u8,
+        #[arg(long)]
+        parameters: bool,
     },
 }
 
@@ -101,8 +103,8 @@ pub(super) fn run() -> Result<()> {
     if matches!(options.command, Action::MesaMaintenance) {
         return maintenance::run();
     }
-    if let Action::AxisMaintenance { axes } = options.command {
-        return maintenance::run_axes(axes);
+    if let Action::AxisMaintenance { axes, parameters } = options.command {
+        return maintenance::run_axes(axes, parameters);
     }
     let store = storage::Store::open()?;
     if matches!(options.command, Action::Status) {

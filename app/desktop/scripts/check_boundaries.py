@@ -1,68 +1,19 @@
 #!/usr/bin/env python3
-"""Enforce QML capability imports and Python public-entry dependency graphs."""
+"""Enforce Python public-entry dependency graphs."""
 
 import ast
 import importlib.util
 import pathlib
-import re
 import sys
 import sysconfig
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 REPOSITORY = ROOT.parents[1]
-MODULES = ROOT / "qml" / "BetterCnc"
-ALLOWED = {
-    "Ui": set(),
-    "Catalog": set(),
-    "Manual": {"Ui", "Catalog"},
-    "Toolpath": {"Ui", "Catalog"},
-    "Program": {"Ui", "Catalog"},
-    "Chrome": {"Ui", "Catalog", "Manual", "Toolpath"},
-}
 errors = []
-for directory in sorted(MODULES.iterdir()):
-    if not directory.is_dir():
-        continue
-    owner = directory.name
-    if owner not in ALLOWED:
-        errors.append(f"Unregistered module: {owner}")
-        continue
-    manifest = directory / "qmldir"
-    if not manifest.exists():
-        errors.append(f"Missing public manifest: {manifest}")
-        continue
-    declared = set(re.findall(r"\b([\w.-]+\.qml)\b", manifest.read_text()))
-    for source in directory.rglob("*.qml"):
-        if source.parent == directory and source.name not in declared:
-            errors.append(f"Undeclared public/internal type: {source}")
-        text = source.read_text()
-        for imported in re.findall(r"^import\s+BetterCnc\.([\w.]+)", text, re.M):
-            if imported not in ALLOWED[owner] and imported != owner:
-                errors.append(f"{source}: forbidden dependency {owner} → {imported}")
-        for imported in re.findall(r'^import\s+"([^"]+)"', text, re.M):
-            target = (source.parent / imported).resolve()
-            if not target.is_relative_to(directory.resolve()):
-                errors.append(f"{source}: cross-module private import {imported}")
-        for imported in re.findall(
-            r'Qt\.(?:createComponent|resolvedUrl)\(\s*[\'"]([^\'"]+)[\'"]', text
-        ):
-            target = (source.parent / imported).resolve()
-            if not target.is_relative_to(directory.resolve()):
-                errors.append(f"{source}: cross-module private resource {imported}")
-        if re.search(r"^import\s+(QtWebEngine|QtWebView|QtNetwork)", text, re.M):
-            errors.append(f"{source}: platform access in a presentation module")
-        if re.search(r"\b(XMLHttpRequest|WebSocket)\b", text):
-            errors.append(f"{source}: network access in a presentation module")
-
-for source in (ROOT / "qml").glob("*.qml"):
-    if re.search(r'^import\s+".*BetterCnc/', source.read_text(), re.M):
-        errors.append(f"{source}: composition must use named public modules")
-
 # Each Python capability owns its underscore-prefixed implementation files.
 # Application launchers are composition roots with one declared dependency.
 PYTHON_GRAPH = {
     "bettercnc": set(),
-    "bettercnc.desktop": {"bettercnc", "bettercnc.session", "bettercnc_error_records"},
     "bettercnc.session": set(),
     "betterlinuxcnc_service": {
         "bettercnc_controller",
@@ -72,7 +23,7 @@ PYTHON_GRAPH = {
     "bettercnc_controller": {"bettercnc_error_records"},
     "bettercnc_error_records": set(),
     "bettercnc_preview": set(),
-    "desktop-launcher": {"bettercnc.desktop"},
+    "session-cli": {"bettercnc.session"},
     "service-launcher": {"betterlinuxcnc_service"},
     "bettercnc_launcher": {"bettercnc_error_records"},
     "orchestration-launcher": {"bettercnc_launcher"},
@@ -122,8 +73,8 @@ for python_root in PYTHON_ROOTS:
                 ):
                     public_exports[module] = set(ast.literal_eval(node.value))
 for source, owner in [
-    (ROOT / "app/main.py", "desktop-launcher"),
-    (ROOT / "app/betterlinuxcnc.in", "desktop-launcher"),
+    (ROOT / "app/main.py", "session-cli"),
+    (ROOT / "app/betterlinuxcnc.in", "session-cli"),
     (REPOSITORY / "app/controller/packaging/betterlinuxcnc-service.in", "service-launcher"),
     (REPOSITORY / "app/launcher/packaging/betterlinuxcnc-launch.in", "orchestration-launcher"),
 ]:
@@ -215,7 +166,4 @@ for source, module, owner, tree in sources:
 if errors:
     print("\n".join(errors), file=sys.stderr)
     sys.exit(1)
-print(
-    f"Module boundaries passed ({len(ALLOWED)} QML modules, "
-    f"{len(PYTHON_GRAPH)} Python capabilities/launchers)."
-)
+print(f"Module boundaries passed ({len(PYTHON_GRAPH)} Python capabilities/launchers).")

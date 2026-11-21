@@ -177,7 +177,7 @@ jobs:
         run: python -m pip install -r app/controller/requirements-ci.txt
       - name: Install Rust for the staged system-service installation
         run: |
-          for module in app/platform/cam-link app/platform/updater app/platform/mesa-update app/platform/manage-ini app/platform/account-management/cnc-maint app/platform/package-build app/platform/local-update app/platform/error-records; do
+          for module in app/platform/cam-link app/platform/updater app/platform/mesa-update app/platform/configuration/manage-ini app/platform/configuration/account-management/cnc-maint app/platform/package-build app/platform/local-update app/platform/error-records app/platform/system-info; do
             version=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["toolchain"]["channel"])' "$module/rust-toolchain.toml")
             # Both crate manifests request these components; preinstall them before parallel builds.
             rustup toolchain install "$version" --profile minimal --component rustfmt --component clippy
@@ -244,9 +244,9 @@ jobs:
             name: Application updater
           - module: app/platform/mesa-update
             name: Mesa firmware checks and flash safeguards
-          - module: app/platform/manage-ini
+          - module: app/platform/configuration/manage-ini
             name: PA maintenance terminal
-          - module: app/platform/account-management/cnc-maint
+          - module: app/platform/configuration/account-management/cnc-maint
             name: Maintenance account management
           - module: app/platform/package-build
             name: Maintenance package building
@@ -254,6 +254,8 @@ jobs:
             name: Local MySQL error records
           - module: app/platform/local-update
             name: Local package update policy
+          - module: app/platform/system-info
+            name: Read-only host system information
     defaults:
       run:
         working-directory: ${{ matrix.module }}
@@ -269,7 +271,7 @@ jobs:
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
           rustup toolchain install "$version" --profile minimal --component rustfmt --component clippy
       - name: Create the isolated maintenance identity for PA process tests
-        if: matrix.module == 'app/platform/manage-ini'
+        if: matrix.module == 'app/platform/configuration/manage-ini'
         run: sudo useradd --system --no-create-home --shell /usr/sbin/nologin cnc-maint
       - name: Check library and Python protocol compatibility
         run: |
@@ -279,52 +281,64 @@ jobs:
           cargo clippy --locked --all-targets -- -D warnings
           SERVICE_TEST_PYTHON=python3 cargo test --locked
       - name: Verify the actual maintenance account systemd service
-        if: matrix.module == 'app/platform/account-management/cnc-maint'
+        if: matrix.module == 'app/platform/configuration/account-management/cnc-maint'
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pamtester
           cargo build --locked
           sudo env GITHUB_ACTIONS=true python3 "$GITHUB_WORKSPACE/.github/ci/account-service-check.py" "$PWD/target/debug/cnc-maint-account"
       - name: Verify PA terminal input through a real pseudoterminal
-        if: matrix.module == 'app/platform/manage-ini'
+        if: matrix.module == 'app/platform/configuration/manage-ini'
         run: |
           cargo build --locked --example terminal-preview
           PA_PREVIEW_BINARY="$PWD/target/debug/examples/terminal-preview" python3 tests/terminal_input.py
 
-  qt-build:
-    name: ${{ matrix.name }}
+  session-checks:
+    name: Python - Headless session client (${{ matrix.python }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - suite: desktop
-            name: Python - Qt desktop backend
-          - suite: qml
-            name: QML - Qt desktop interface
+        python: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Check the Qt container entry point
-        run: |
-          shellcheck app/desktop/scripts/ci-check.sh
-          bash -n app/desktop/scripts/ci-check.sh
-      - name: Check this Qt module in Debian 13
-        env:
-          QT_SUITE: ${{ matrix.suite }}
-        run: |
-          docker run --rm --init --platform linux/amd64 \
-            --env CI=true \
-            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/workspace" \
-            --workdir /workspace \
-            debian:13-slim \
-            bash app/desktop/scripts/ci-check.sh --install-deps --suite "$QT_SUITE"
-      - name: Upload Qt test diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7
+      - uses: actions/setup-python@v6
         with:
-          name: native-qt-${{ matrix.suite }}-diagnostics
-          path: build/Testing/Temporary/
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: app/controller/requirements-ci.txt
+      - name: Install pinned Python build and check tools
+        run: python -m pip install -r app/controller/requirements-ci.txt
+      - name: Check the installed headless session client
+        run: bash app/desktop/scripts/ci-check.sh
+
+  desktop-controls:
+    name: TypeScript - Manual control desktop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Build and verify desktop controls in Debian 13
+        run: |
+          mkdir -p desktop-artifacts
+          docker run --rm --init --platform linux/amd64 \
+            --env GITHUB_ACTIONS=true \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/workspace" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/desktop-artifacts,dst=/output" \
+            --workdir /workspace debian:13-slim \
+            bash app/desktop/scripts/frontend-check.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: manual-control-desktop-${{ github.sha }}
+          path: |
+            desktop-artifacts/
+            app/desktop/web/test-results/
           if-no-files-found: ignore
 
   deb-package:
@@ -346,6 +360,8 @@ jobs:
             --mount "type=bind,src=$GITHUB_WORKSPACE/release-artifacts,dst=/output" \
             --workdir /workspace debian:13-slim \
             bash .github/ci/deb-package.sh
+      - name: Package Mesa sources and manifest from the same Git revision
+        run: python3 .github/ci/package-mesa.py release-artifacts
       - uses: actions/upload-artifact@v7
         with:
           name: betterlinuxcnc-deb-${{ github.sha }}
@@ -370,7 +386,8 @@ jobs:
         preview-checks,
         config-checks,
         rust-checks,
-        qt-build,
+        session-checks,
+        desktop-controls,
         deb-package,
       ]
     steps:

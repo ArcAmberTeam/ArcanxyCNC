@@ -547,12 +547,12 @@ mod tests {
             if url.contains("/releases/") {
                 let mut assets = vec![serde_json::json!({
                     "name": "mesa-release.json", "size": serde_json::to_vec(&manifest)?.len(),
-                    "browser_download_url": "https://github.com/ArcAmberTeam/CNC-Mesa/releases/download/v26.10.26.1/mesa-release.json",
+                    "browser_download_url": "https://github.com/ArcAmberTeam/ArcanxyCNC/releases/download/v26.10.26.1/mesa-release.json",
                 })];
                 for artifact in [&manifest.artifacts.source, &manifest.artifacts.integration] {
                     assets.push(serde_json::json!({
                         "name": artifact.asset, "size": artifact.size_bytes,
-                        "browser_download_url": format!("https://github.com/ArcAmberTeam/CNC-Mesa/releases/download/v26.10.26.1/{}", artifact.asset),
+                        "browser_download_url": format!("https://github.com/ArcAmberTeam/ArcanxyCNC/releases/download/v26.10.26.1/{}", artifact.asset),
                     }));
                 }
                 return Ok(serde_json::to_vec(&serde_json::json!({

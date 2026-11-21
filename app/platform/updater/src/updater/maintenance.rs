@@ -15,7 +15,7 @@ const PROTOCOL: &str = "betterlinuxcnc-mesa-maintenance-v1";
 
 //--------//
 // BEGIN: AxisProfileMaintenance
-pub(super) fn run_axes(axes: u8) -> Result<()> {
+pub(super) fn run_axes(axes: u8, save_parameters: bool) -> Result<()> {
     if !cfg!(target_os = "linux")
         || unsafe { libc::getuid() } != 0
         || unsafe { libc::geteuid() } != 0
@@ -28,6 +28,13 @@ pub(super) fn run_axes(axes: u8) -> Result<()> {
     let lock = store.lock()?;
     let (manager, socket, uid) = broker::machine_context()?;
     install::preflight(&socket, &manager, uid)?;
+    let mut parameters = Vec::new();
+    if save_parameters {
+        std::io::stdin().take(16385).read_to_end(&mut parameters)?;
+        if parameters.is_empty() || parameters.len() > 16384 {
+            return Err("Invalid axis parameter request size".into());
+        }
+    }
     let count = axes.to_string();
     let prepared = super::command(APPLIANCE)
         .args(["axis-profile", "prepare-system", &count])
@@ -43,6 +50,20 @@ pub(super) fn run_axes(axes: u8) -> Result<()> {
         .as_str()
         .filter(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
         .ok_or("Invalid profile revision")?;
+    if !parameters.is_empty() {
+        let mut validate = super::command("/usr/lib/betterlinuxcnc/manage-ini/pa-config")
+            .args(["validate-parameters", &format!("axis-{count}.ini")])
+            .stdin(Stdio::piped())
+            .spawn()?;
+        validate
+            .stdin
+            .take()
+            .ok_or("Missing profile input")?
+            .write_all(&parameters)?;
+        if !validate.wait()?.success() {
+            return Err("Axis configuration changed or parameters are invalid".into());
+        }
+    }
     let original = install::preflight(&socket, &manager, uid)?;
     let launcher = PausedLauncher::stop(manager, original)?;
     let result: Result<()> = (|| {
@@ -62,11 +83,16 @@ pub(super) fn run_axes(axes: u8) -> Result<()> {
                 Ok(())
             });
         }
-        let status = apply
+        let mut child = apply
             .args(["axis-profile", "apply-system", &count, revision])
-            .stdin(Stdio::null())
-            .status()?;
-        if !status.success() {
+            .stdin(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .ok_or("Missing profile input")?
+            .write_all(&parameters)?;
+        if !child.wait()?.success() {
             return Err("Profile switch did not complete; control remains stopped".into());
         }
         Ok(())

@@ -33,8 +33,8 @@ def account(name):
     return SimpleNamespace(pw_uid=1001)
 def run(args, **kwargs):
     assert args[:3] == ['/usr/bin/dpkg-query', '-W', '-f=${Version}']
-    assert args[3] in ('linuxcnc-uspace', 'linuxcnc-uspace-dev', 'betterlinuxcnc-qt')
-    return SimpleNamespace(stdout='26.10.26.5' if args[3] == 'betterlinuxcnc-qt' else '2.9.10')
+    assert args[3] in ('linuxcnc-uspace', 'linuxcnc-uspace-dev', 'betterlinuxcnc')
+    return SimpleNamespace(stdout='26.10.26.5' if args[3] == 'betterlinuxcnc' else '2.9.10')
 def sync(fd):
     if fault == 'write':
         raise OSError('Injected storage failure before atomic publication')
@@ -233,6 +233,20 @@ class AxisUpgradeTests(unittest.TestCase):
             self.assertLess(minimum, -7.629394360719743e-08)
             self.assertGreater(minimum, ini.getfloat(f"JOINT_{joint}", "HOME_OFFSET"))
             self.assertEqual(ini.getfloat(f"AXIS_{axis}", "MIN_LIMIT"), minimum)
+
+    def test_already_current_preserves_individually_tuned_named_profiles(self):
+        self.assertEqual(self.invoke().returncode, 0)
+        original = self.contents()
+        name = "axis-3.ini"
+        tuned = (
+            b"; BetterLinuxCNC axis profile from "
+            + "烛龙V2.ini\n".encode()
+            + original["烛龙V2.ini"]
+            + b"\n; local tuning\n"
+        )
+        (self.machine / name).write_bytes(tuned)
+        self.assertEqual(self.invoke().returncode, 0)
+        self.assertEqual(self.contents(), {**original, name: tuned})
 
     def test_preserves_generated_axis_profiles_and_rejects_changed_evidence(self):
         self.assertEqual(self.invoke().returncode, 0)

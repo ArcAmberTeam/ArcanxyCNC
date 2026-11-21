@@ -1,0 +1,33 @@
+name: Browser axis preset helper
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'app/platform/configuration/manage-ini/**'
+      - 'app/desktop/web/scripts/axis-preview.ts'
+      - 'tools/appliance/templates/axis-*.ini'
+      - '.github/workflows/axis-preview.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  macos-preview:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app/platform/configuration/manage-ini
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Check file isolation and build the preview helper
+        run: |
+          cargo test --locked --lib axis_preview::tests
+          cargo build --release --locked --bin pa-config
+          tar -czf "$RUNNER_TEMP/axis-preview.tar.gz" -C target/release pa-config
+      - uses: actions/upload-artifact@v7
+        with:
+          name: axis-preview-macOS-${{ runner.arch }}
+          path: ${{ runner.temp }}/axis-preview.tar.gz

@@ -13,10 +13,11 @@ import os
 import pwd
 import re
 import stat
+import subprocess
 import uuid
 
 import _homing
-from axis_profiles import migration_base
+from axis_profiles import ENV, HELPER, PROFILE_NAMES, migration_base, stock_presets
 
 V4_REVISION = "zhulong-xyz-20261026"
 REVISION = "zhulong-xyz-v5-20261026"
@@ -242,9 +243,11 @@ def _upgrade(root, config):
             return "not-applicable"
         if b"PROFILE = zhulong-v2" not in content:
             return "not-applicable"
-        files = {name: _read(machine, name) for name in os.listdir(machine)}
+        installed = {name: _read(machine, name) for name in os.listdir(machine)}
+        files = installed
+        counts = [count for count, name in PROFILE_NAMES.items() if name in installed]
         manifest = json.loads(files[MANIFEST])
-        if manifest.get("configurationRevision") == REVISION:
+        if manifest.get("configurationRevision") == REVISION or counts:
             files = migration_base(files, INI)
         if set(files) != set(ORIGINAL):
             raise ValueError(
@@ -267,7 +270,17 @@ def _upgrade(root, config):
             "Machine configuration differs from the commissioned v1/v4 input"
         )
     launcher = json.loads(_read(config, "launcher.json"))
-    if launcher.get("ini") != "/etc/betterlinuxcnc/machine/" + INI:
+    if counts:
+        for name, data in stock_presets(files, INI, counts).items():
+            if installed.get(name) != data:
+                raise ValueError(
+                    "An axis preset was tuned locally; preserve it for migration review"
+                )
+    allowed = {
+        "/etc/betterlinuxcnc/machine/" + name
+        for name in [INI, *(PROFILE_NAMES[c] for c in counts)]
+    }
+    if launcher.get("ini") not in allowed:
         raise ValueError("Launcher does not select the reviewed machine configuration")
     _stopped(root)
     _homing.validate_installed()
@@ -281,11 +294,24 @@ def _upgrade(root, config):
             "Install the corrected signed-profile HOMEMOD before migrating axes"
         )
     updated = _fast_profile(_correct(files) if hashes == ORIGINAL else files)
+    if counts:
+        updated.update(stock_presets(updated, INI, counts))
     stage = ".axis-upgrade-" + uuid.uuid4().hex
     os.mkdir(stage, 0o700, dir_fd=config)
     try:
         with _directory(config, stage) as staged:
             for name, data in updated.items():
+                if name in PROFILE_NAMES.values():
+                    subprocess.run(
+                        [HELPER, "stage-axis", name],
+                        input=data,
+                        check=True,
+                        env=ENV,
+                        cwd=f"/proc/self/fd/{staged}",
+                        pass_fds=(staged,),
+                        timeout=20,
+                    )
+                    continue
                 descriptor = os.open(
                     name,
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -301,7 +327,9 @@ def _upgrade(root, config):
             os.fsync(staged)
         _stopped(root)
         with _directory(config, "machine") as machine:
-            if {name: _read(machine, name) for name in ORIGINAL} != files:
+            if {
+                name: _read(machine, name) for name in os.listdir(machine)
+            } != installed:
                 raise ValueError("Machine configuration changed during migration")
         _exchange(config, stage, "machine")
         os.fsync(config)

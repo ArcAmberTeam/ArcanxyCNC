@@ -1,4 +1,4 @@
-"""Dedicated non-administrative identities and ownership, only used by root."""
+"""Provision dedicated appliance identities and their directories as root."""
 
 import grp
 import os
@@ -7,10 +7,14 @@ import stat
 import subprocess
 from pathlib import Path
 
+from _package_identity import PACKAGE
+
 OPERATOR = "linuxcnc"
 MAINTENANCE = "cnc-maint"
 HOME = Path("/var/lib/betterlinuxcnc/home")
 MAINTENANCE_HOME = Path("/var/lib/betterlinuxcnc/maintenance")
+ADMIN = "cnc_admin"
+ADMIN_HOME = Path("/var/lib/betterlinuxcnc/admin")
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 HARDWARE_GROUPS = ("video", "render", "audio", "realtime")
 
@@ -132,6 +136,7 @@ def provision():
     identities = (
         (OPERATOR, HOME, operator_groups),
         (MAINTENANCE, MAINTENANCE_HOME, ["cnc-logs"]),
+        (ADMIN, ADMIN_HOME, []),
     )
     # Reject unexpected existing identities before creating or changing accounts.
     for name, home, groups in identities:
@@ -159,7 +164,7 @@ def provision():
     for root in (
         "/usr/lib/betterlinuxcnc",
         "/usr/share/betterlinuxcnc",
-        "/usr/share/doc/betterlinuxcnc-qt",
+        f"/usr/share/doc/{PACKAGE}",
         "/var/lib/betterlinuxcnc",
         "/var/cache/betterlinuxcnc",
         "/var/log/betterlinuxcnc",
@@ -168,6 +173,7 @@ def provision():
         directory(root)
     directory(HOME, OPERATOR, OPERATOR, 0o700)
     directory(MAINTENANCE_HOME, "root", MAINTENANCE, 0o750)
+    directory(ADMIN_HOME, ADMIN, ADMIN, 0o700)
     for child in ("programs", "inbox", "machine"):
         directory(f"/var/lib/betterlinuxcnc/{child}", OPERATOR, OPERATOR, 0o700)
     directory("/var/cache/betterlinuxcnc/user", OPERATOR, OPERATOR, 0o700)

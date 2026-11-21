@@ -53,6 +53,10 @@ def run(command, **kwargs):
             path = root / 'etc/launcher.json'
             path.write_text(path.read_text() + ' ')
         return SimpleNamespace(returncode=0)
+    if command[:2] == [axis_profiles.HELPER, 'seed-axis']:
+        with (root / 'etc/machine' / command[2]).open('xb') as preset:
+            preset.write(kwargs['input'])
+        return SimpleNamespace(returncode=0)
     if command[:2] == ['/usr/bin/systemctl', '--system']:
         return SimpleNamespace(returncode=0, stdout='inactive\n')
     raise AssertionError('Unexpected process: ' + repr(command))
@@ -60,8 +64,8 @@ subprocess.run = run
 if fault == 'commit':
     original_replace = os.replace
     def replace(source, destination):
-        if Path(destination) == root / 'etc/machine/machine.ini':
-            raise OSError('Injected failure before the atomic INI commit')
+        if Path(destination) == root / 'etc/launcher.json':
+            raise OSError('Injected failure before selecting the preset')
         return original_replace(source, destination)
     os.replace = replace
 if arguments[0] == 'apply-system' and fault != 'missing-lock':
@@ -150,10 +154,14 @@ class AxisProfileCliTests(unittest.TestCase):
                 *arguments,
             ],
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             text=True,
             check=False,
             timeout=15,
         )
+
+    def active_ini(self):
+        return Path(json.loads(self.launcher.read_bytes())["ini"])
 
     def revision(self, count=5):
         result = self.invoke("prepare-system", str(count))
@@ -195,15 +203,20 @@ class AxisProfileCliTests(unittest.TestCase):
         self.assertEqual(self.ini.read_text(), self.original)
         self.assertNotEqual(self.invoke("request", "6").returncode, 0)
 
-    def test_round_trip_writes_same_ini_correct_channels_and_preserves_xyz(self):
+    def test_round_trip_selects_stable_presets_correct_channels_and_preserves_xyz(self):
         for count, axes in ((5, "XYZAC"), (4, "XYZC"), (3, "XYZ")):
             result = self.apply(count)
             self.assertEqual(result.returncode, 0, result.stderr)
-            text = self.ini.read_text()
+            target = self.active_ini()
+            self.assertEqual(target, self.machine / f"axis-{count}.ini")
+            self.assertEqual(len(list(self.machine.glob("axis-*.ini"))), 3)
+            text = target.read_text()
             self.assertIn(f"JOINTS = {count}", text)
             self.assertIn(f"COORDINATES = {axes}", text)
             self.assertIn("STEP_SCALE = 200\nHOME_OFFSET = -5", text)
-            self.assertEqual(self.launcher.read_text(), self.launcher_content)
+            self.assertEqual(
+                json.loads(self.launcher.read_bytes())["cam"], {"port": 1234}
+            )
             self.assertEqual(
                 (self.machine / "machine.hal").read_text(), self.original_hal
             )
@@ -259,9 +272,9 @@ class AxisProfileCliTests(unittest.TestCase):
         self.assertEqual(self.apply(3).returncode, 0)
         self.assertEqual(self.ini.read_text(), repeated)
         conflicting = repeated.replace("GEOMETRY = XYZ\n", "GEOMETRY = XZY\n", 1)
-        self.ini.write_text(conflicting)
+        self.active_ini().write_text(conflicting)
         self.assertNotEqual(self.invoke("request", "5").returncode, 0)
-        self.assertEqual(self.ini.read_text(), conflicting)
+        self.assertEqual(self.active_ini().read_text(), conflicting)
 
     def test_captured_zhulong_first_use_generates_confirmed_rotary_transmission(self):
         captured = json.loads(
@@ -277,7 +290,7 @@ class AxisProfileCliTests(unittest.TestCase):
             result = self.apply(count)
             self.assertEqual(result.returncode, 0, result.stderr)
             parser = configparser.ConfigParser(strict=False)
-            parser.read_string(self.ini.read_text())
+            parser.read_string(self.active_ini().read_text())
             for section in (
                 "AXIS_X",
                 "AXIS_Y",
@@ -306,6 +319,9 @@ class AxisProfileCliTests(unittest.TestCase):
                 self.assertEqual(parser.getfloat("JOINT_3", "MAX_LIMIT"), 90)
             for key in ("MOTOR_MAPPING_VERIFIED", "MOTOR_DIRECTIONS_VERIFIED"):
                 self.assertEqual(parser.get("BETTERCNC_HOMING", key), "NO")
+        self.launcher.write_text(self.launcher_content)
+        for path in self.machine.glob("axis-*.ini"):
+            path.unlink()
         self.ini.write_text(original + "\n[AXIS_C]\nMAX_VELOCITY = 7\n")
         self.assertNotEqual(self.invoke("request", "4").returncode, 0)
         self.ini.write_text(original.replace("MACHINE = 烛龙V2", "MACHINE = Other"))
@@ -329,22 +345,46 @@ class AxisProfileCliTests(unittest.TestCase):
 
     def test_failed_ini_commit_keeps_previous_configuration_and_allows_retry(self):
         self.assertEqual(self.apply(4).returncode, 0)
-        before = self.ini.read_bytes()
+        before = self.launcher.read_bytes()
         result = self.apply(5, fault="commit")
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.ini.read_bytes(), before)
+        self.assertEqual(self.launcher.read_bytes(), before)
         result = self.apply(5)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("COORDINATES = XYZAC", self.ini.read_text())
+        self.assertIn("COORDINATES = XYZAC", self.active_ini().read_text())
 
     def test_external_edits_are_not_discarded_when_switching_back(self):
         self.assertEqual(self.apply(5).returncode, 0)
-        self.ini.write_text(
-            self.ini.read_text().replace("HOME_OFFSET = -5", "HOME_OFFSET = -6")
-        )
-        before = self.ini.read_bytes()
-        self.assertNotEqual(self.invoke("prepare-system", "3").returncode, 0)
-        self.assertEqual(self.ini.read_bytes(), before)
+        five = self.active_ini()
+        edited = five.read_text().replace("HOME_OFFSET = -5", "HOME_OFFSET = -6")
+        five.write_text(edited)
+        self.assertEqual(self.apply(3).returncode, 0)
+        self.assertIn("HOME_OFFSET = -5", self.active_ini().read_text())
+        self.assertEqual(self.apply(5).returncode, 0)
+        self.assertEqual(self.active_ini(), five)
+        self.assertEqual(five.read_text(), edited)
+        self.assertEqual(self.ini.read_text(), self.original)
+
+    def test_missing_wiring_presets_are_editable_files_but_unavailable_for_switching(
+        self,
+    ):
+        self.ini.write_text(self.original.split("[AXIS_A]")[0])
+        self.assertEqual(self.apply(3).returncode, 0)
+        for count in (4, 5):
+            path = self.machine / f"axis-{count}.ini"
+            self.assertIn(f"JOINTS = {count}", path.read_text())
+            self.assertNotEqual(self.invoke("request", str(count)).returncode, 0)
+        five = configparser.ConfigParser()
+        five.read(self.machine / "axis-5.ini")
+        self.assertEqual(five["TRAJ"]["COORDINATES"], "XYZBC")
+        self.assertEqual(five.getint("SPINDLE_0", "MAX_FORWARD_VELOCITY"), 24000)
+        self.assertEqual(five.getint("BETTERCNC_PLATFORM", "MACHINING_DEPTH_MM"), 90)
+        self.assertFalse(five.has_option("BETTERCNC_HOMING", "TRAVEL_Z_MM"))
+        profiles = json.loads(self.invoke("status").stdout)["profiles"]
+        profile = next(item for item in profiles if item["axis_count"] == 5)
+        self.assertEqual(profile["axes"], "XYZBC")
+        self.assertFalse(profile["available"])
+        self.assertEqual(self.active_ini(), self.machine / "axis-3.ini")
 
     def test_rejects_occupied_rotary_channel_and_unsafe_source(self):
         hal = self.machine / "machine.hal"

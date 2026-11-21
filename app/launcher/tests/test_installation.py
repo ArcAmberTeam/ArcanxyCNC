@@ -21,9 +21,9 @@ class InstallationTests(unittest.TestCase):
         )
         self.assertFalse(importlib.metadata.requires("betterlinuxcnc-error-records"))
 
-    def test_standalone_desktop_installs_only_its_own_application(self):
+    def test_standalone_session_installs_without_a_graphical_runtime(self):
         source = Path(__file__).resolve().parents[3] / "app/desktop"
-        with tempfile.TemporaryDirectory(prefix="desktop-install-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="session-install-") as temporary:
             root = Path(temporary)
             build = root / "build"
             stage = root / "stage"
@@ -42,7 +42,7 @@ class InstallationTests(unittest.TestCase):
                 timeout=60,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("Building the desktop only", result.stdout)
+            self.assertIn("Installing the headless session client only", result.stdout)
             result = subprocess.run(
                 ["cmake", "--install", str(build)],
                 env=dict(os.environ, DESTDIR=str(stage)),
@@ -59,7 +59,7 @@ class InstallationTests(unittest.TestCase):
                 {path.name for path in (stage / "usr/lib/betterlinuxcnc/python").iterdir()},
                 {"bettercnc"},
             )
-            self.assertTrue((stage / "usr/share/betterlinuxcnc/qml/Main.qml").is_file())
+            self.assertFalse((stage / "usr/lib/betterlinuxcnc/desktop").exists())
             self.assertFalse((stage / "usr/lib/systemd").exists())
             self.assertFalse((stage / "etc").exists())
 
@@ -131,7 +131,7 @@ class InstallationTests(unittest.TestCase):
         with (source / "app/desktop/pyproject.toml").open("rb") as metadata:
             application_version = tomllib.load(metadata)["project"]["version"]
         architecture = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
-        self.assertEqual(fields["Package"], "betterlinuxcnc-qt")
+        self.assertEqual(fields["Package"], "betterlinuxcnc")
         self.assertEqual(fields["Version"], application_version)
         installed_version = subprocess.check_output(
             [sys.executable, "-c", "from bettercnc import __version__; print(__version__)"],
@@ -143,7 +143,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(fields["Architecture"], architecture)
         self.assertEqual(
             package.name,
-            f"betterlinuxcnc-qt_{fields['Version']}_{fields['Architecture']}.deb",
+            f"betterlinuxcnc_{fields['Version']}_{fields['Architecture']}.deb",
         )
         dependencies = {entry.strip().split()[0] for entry in fields["Depends"].split(",")}
         self.assertNotIn("pkexec", dependencies)
@@ -261,7 +261,7 @@ class InstallationTests(unittest.TestCase):
             self.assertEqual(updater_config.read_text(), '{"account":"preserve-local-policy"}')
             self.assertFalse((config.parent / "launcher.example.json").exists())
             self.assertTrue(
-                (stage / "usr/share/doc/betterlinuxcnc-qt/examples/launcher.example.json").is_file()
+                (stage / "usr/share/doc/betterlinuxcnc/examples/launcher.example.json").is_file()
             )
             self.assertTrue((stage / "usr/sbin/betterlinuxcnc-appliance").is_file())
             self.assertTrue((stage / "usr/lib/betterlinuxcnc/appliance/maintenance.py").is_file())
@@ -326,7 +326,7 @@ class InstallationTests(unittest.TestCase):
             parser.read(stage / "etc/xdg/autostart/betterlinuxcnc-autostart.desktop")
             self.assertIn("--session-start", parser["Desktop Entry"]["Exec"])
             self.assertNotEqual(parser["Desktop Entry"].get("Hidden"), "true")
-            parser.read(stage / "usr/share/applications/betterlinuxcnc-qt.desktop")
+            parser.read(stage / "usr/share/applications/betterlinuxcnc.desktop")
             self.assertEqual(
                 parser["Desktop Entry"]["Exec"], "betterlinuxcnc-launch --session-start"
             )

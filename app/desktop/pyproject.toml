@@ -3,16 +3,16 @@ requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "betterlinuxcnc-qt"
-version = "26.11.05.1"
-description = "QML desktop with a private Unix socket connection to LinuxCNC"
+name = "betterlinuxcnc-session"
+version = "26.11.21.1"
+description = "Headless Unix status client for BetterLinuxCNC"
 requires-python = ">=3.11"
 license = "GPL-2.0-or-later"
 license-files = ["LICENSE"]
-dependencies = ["PySide6>=6.8,<7", "betterlinuxcnc-error-records==0.1.0"]
+dependencies = []
 
 [project.scripts]
-betterlinuxcnc = "bettercnc.desktop:main"
+betterlinuxcnc-status = "bettercnc.session:main"
 
 [tool.setuptools.packages.find]
 where = ["python"]

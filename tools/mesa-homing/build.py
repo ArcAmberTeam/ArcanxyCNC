@@ -91,8 +91,6 @@ def build(root, output, integration_tests):
     if core_version != "2.9.10":
         raise ValueError("Review the HOMEMOD ABI before changing the native core version")
     app_version = tomllib.loads((root / "app/desktop/pyproject.toml").read_text())["project"]["version"]
-    if source["release"] != f"v{app_version}":
-        raise ValueError("Vendor Release and application version must match")
     commit = run("git", "-c", f"safe.directory={root}", "-C", root, "rev-parse", "HEAD", capture=True).stdout.strip()
     with tempfile.TemporaryDirectory(prefix="mesa-homing-") as temporary:
         work = Path(temporary)
@@ -135,7 +133,9 @@ def build(root, output, integration_tests):
                         subprocess.run([str(harness), scenario, str(axis), *profile], check=True, timeout=15)
         if integration_tests:
             run("/usr/bin/python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_linuxcnc_config.py", "-v", cwd=staged_vendor)
-            run("/usr/bin/python3", staged_vendor / "tools/test_hdl.py", cwd=staged_vendor)
+            fpga = native / "vendor/cnc-mesa-fpga"
+            run("/usr/bin/python3", fpga / "firmware/prepare.py", cwd=fpga)
+            run("/usr/bin/python3", fpga / "tools/test_hdl.py", cwd=fpga)
         provenance = {
             "schema_version": 1, "module": "zhulong_homing.so", "sha256": digest(module),
             "architecture": "amd64", "application_version": app_version,

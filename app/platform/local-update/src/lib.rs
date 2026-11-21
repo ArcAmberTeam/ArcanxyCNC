@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 const ORIGIN: &str = "/var/lib/betterlinuxcnc/build-origin.json";
-const PACKAGE: &str = "betterlinuxcnc-qt";
+const PACKAGE: &str = "betterlinuxcnc";
 const LIMIT: u64 = 256 * 1024 * 1024;
 
 pub(crate) fn command(path: &str) -> Command {
@@ -42,8 +42,20 @@ fn query(program: &str, args: &[&str]) -> Result<String> {
     }
     Ok(String::from_utf8(output.stdout)?.trim().to_owned())
 }
+/// The migration package uses the previous dpkg identity until the next official install.
+pub fn installed_package() -> &'static str {
+    if Path::new("/usr/share/betterlinuxcnc/package-rename").is_file() {
+        "betterlinuxcnc-qt"
+    } else {
+        PACKAGE
+    }
+}
+
 pub fn installed_version() -> Result<String> {
-    query("/usr/bin/dpkg-query", &["-W", "-f=${Version}", PACKAGE])
+    query(
+        "/usr/bin/dpkg-query",
+        &["-W", "-f=${Version}", installed_package()],
+    )
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -104,9 +116,13 @@ fn official_policy(candidate: &str, installed: &str, local: bool) -> Result<bool
         _ => Err("Version comparison failed".into()),
     }
 }
-/// Official packages may replace a local build at the same version, never downgrade it.
+/// A same-version official package may replace the migration bridge or a local build.
 pub fn accepts_official(candidate: &str, installed: &str) -> Result<bool> {
-    official_policy(candidate, installed, is_self_compiled(installed)?)
+    official_policy(
+        candidate,
+        installed,
+        installed_package() != PACKAGE || is_self_compiled(installed)?,
+    )
 }
 /// Call after a verified official package has installed successfully, before restarting UI.
 pub fn clear_origin() -> Result<()> {
@@ -130,6 +146,11 @@ impl PreparedLocalPackage {
     /// The caller must hold the shared update lock and validate the archive contents next.
     pub fn receive(input: impl Read, cache: &Path) -> Result<Self> {
         root()?;
+        if installed_package() != PACKAGE {
+            return Err(
+                "Complete the official package rename before installing a local build".into(),
+            );
+        }
         trusted_directory(cache)?;
         let mut file = tempfile::Builder::new()
             .prefix("maintenance-")

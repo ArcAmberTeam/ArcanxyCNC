@@ -1,0 +1,33 @@
+{
+  "name": "zhulong-v2",
+  "fpga": "xc6slx9",
+  "package": "tqg144",
+  "speed_grade": "-2",
+  "speed_grade_evidence": "Mesa seveni92.xise reference; not confirmed from chip marking",
+  "board_package": "i92_x9card",
+  "pin_package": "PIN_ZHULONG_V2_34",
+  "top_entity": "TopEthernetHostMot2",
+  "top_source": "TopEthernet16HostMot2.vhd",
+  "ise_project": "seveni92.xise",
+  "constraints": "7i92.ucf",
+  "physical_constraints_verified": false,
+  "original_bitstream": "mesa/firmware/original/TopEthernetHostMot2.bit",
+  "homing": {
+    "distance_mm": 5,
+    "active_low": false,
+    "axes": {
+      "X": {
+        "gpio": 20,
+        "direction": -1
+      },
+      "Y": {
+        "gpio": 21,
+        "direction": 1
+      },
+      "Z": {
+        "gpio": 22,
+        "direction": -1
+      }
+    }
+  }
+}

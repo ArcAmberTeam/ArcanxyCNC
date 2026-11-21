@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Source-tree launcher; installed launches use the same desktop entry point."""
+"""Launch the packaged source-tree desktop or query controller status."""
 
+import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root / "python"))
 
-from bettercnc.desktop import main  # noqa: E402
+if "--check-connection" in sys.argv[1:]:
+    from bettercnc.session import main
 
-if __name__ == "__main__":
     raise SystemExit(main())
+
+desktop = root / "web/release/linux-unpacked/betterlinuxcnc-desktop"
+os.execv(desktop, [str(desktop), *sys.argv[1:]])

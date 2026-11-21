@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.tsbuildinfo
+dist-electron/
+release/
+test-results/
+playwright-report/

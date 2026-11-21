@@ -107,7 +107,11 @@ pub(crate) fn installed_version() -> Result<String> {
         .args([
             "-W",
             "-f=${db:Status-Status}\n${Version}\n",
-            "betterlinuxcnc-qt",
+            if Path::new("/usr/share/betterlinuxcnc/package-rename").is_file() {
+                "betterlinuxcnc-qt"
+            } else {
+                "betterlinuxcnc"
+            },
         ])
         .output()
         .map_err(|_| "Cannot query the installed application package")?;

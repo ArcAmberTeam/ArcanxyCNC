@@ -22,6 +22,10 @@ import _policy
 import axis_profiles
 from bettercnc_error_records import report
 
+ACCOUNT_MANAGER = Path(
+    "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account"
+)
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -43,6 +47,10 @@ def main():
     commands.add_parser(
         "provision",
         help="Idempotently create dedicated accounts and system data directories",
+    )
+    commands.add_parser(
+        "issue-admin-code",
+        help="Issue a one-time administrator code on the installer terminal",
     )
     commands.add_parser(
         "backup", help="Create a verified root-private configuration snapshot"
@@ -112,6 +120,7 @@ def main():
                 {
                     "operator": _accounts.OPERATOR,
                     "maintenance": _accounts.MAINTENANCE,
+                    "administrator": _accounts.ADMIN,
                     "operatorHome": str(_accounts.HOME),
                     "config": str(_machine.CONFIG),
                     "data": str(_machine.DATA),
@@ -135,14 +144,13 @@ def main():
         return 0
     if sys.platform != "linux" or os.geteuid() != 0:
         raise ValueError("Host provisioning requires a Linux root maintenance session")
+    if args.action == "issue-admin-code":
+        os.execv(ACCOUNT_MANAGER, [str(ACCOUNT_MANAGER), "issue-admin-code"])
     if args.action == "provision":
         _accounts.provision()
         axis_profiles.install_integration()
-        account_manager = Path(
-            "/usr/lib/betterlinuxcnc/account-management/cnc-maint/cnc-maint-account"
-        )
-        if account_manager.is_file():
-            _accounts.run(str(account_manager), "provision")
+        if ACCOUNT_MANAGER.is_file():
+            _accounts.run(str(ACCOUNT_MANAGER), "provision")
         print("Maintenance policy: " + _policy.upgrade_maintenance())
         error_records = Path(
             "/usr/lib/betterlinuxcnc/error-records/betterlinuxcnc-error-records"
@@ -150,11 +158,24 @@ def main():
         if error_records.is_file():
             _accounts.run(str(error_records), "provision")
         print("Machine axis migration: " + _axis_upgrade.upgrade())
+        if (axis_profiles.CONFIG / "launcher.json").is_file():
+            axis_profiles.AxisProfileStore().seed()
         if Path("/run/systemd/system").is_dir():
             _accounts.run("/usr/bin/systemctl", "daemon-reload")
+            if Path(
+                "/usr/lib/systemd/system/betterlinuxcnc-axis-parameters.socket"
+            ).is_file():
+                _accounts.run(
+                    "/usr/bin/systemctl",
+                    "enable",
+                    "--now",
+                    "betterlinuxcnc-axis-parameters.socket",
+                )
         print("Provisioned dedicated accounts and system data directories")
     elif args.action == "migrate-machine":
         print("Machine axis migration: " + _axis_upgrade.upgrade())
+        if (axis_profiles.CONFIG / "launcher.json").is_file():
+            axis_profiles.AxisProfileStore().seed()
     elif args.action == "backup":
         print(json.dumps(_backup.backup()))
     elif args.action == "prepare":
@@ -174,12 +195,13 @@ def main():
             owner=(account.pw_uid, account.pw_gid),
             configure_profile=configure_profile,
         )
+        axis_profiles.AxisProfileStore().seed()
         print("Prepared fixed appliance paths; original machine files are preserved")
     elif args.action == "set-maintenance-password":
         _accounts.password(sys.stdin.readline(258).rstrip("\n"))
         print("Maintenance password configured; future updates do not reset it")
     elif args.action == "activate":
-        for name in ("linuxcnc", "cnc-maint"):
+        for name in (_accounts.OPERATOR, _accounts.MAINTENANCE, _accounts.ADMIN):
             pwd.getpwnam(name)
         if not Path("/etc/betterlinuxcnc/launcher.json").is_file():
             raise ValueError("Prepare and verify the machine configuration first")

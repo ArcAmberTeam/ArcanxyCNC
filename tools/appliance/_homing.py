@@ -10,6 +10,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+from _package_identity import PACKAGE
+
 PROFILE = "zhulong-v2"
 VENDOR_COMMIT = "f705f3d33a2c35aee601558f072cb1f620a31587"
 AXES = (("X", 0, 20, "neg", -1), ("Y", 1, 21, "pos", 1), ("Z", 2, 22, "neg", -1))
@@ -99,7 +101,7 @@ def validate_installed():
     try:
         core = _package_version("linuxcnc-uspace")
         development = _package_version("linuxcnc-uspace-dev")
-        app = _package_version("betterlinuxcnc-qt")
+        app = _package_version(PACKAGE)
         metadata = json.loads(
             _installed_file(
                 "/usr/share/betterlinuxcnc/homing/provenance.json", 256 * 1024

@@ -14,7 +14,7 @@ import tempfile
 import time
 from pathlib import Path, PurePosixPath
 
-from axis_configuration import AXES, axis_count, generate, hal_files
+from axis_configuration import AXES, axis_count, generate, hal_files, parse_ini
 from bettercnc_error_records import report
 
 CONFIG = Path("/etc/betterlinuxcnc")
@@ -64,12 +64,80 @@ def relative_file(name):
     return path
 
 
+HELPER = "/usr/lib/betterlinuxcnc/manage-ini/pa-config"
+PROFILE_NAMES = {count: f"axis-{count}.ini" for count in AXES}
+PROFILE_HEADER = "; BetterLinuxCNC axis profile from "
+
+
+def profile_origin(content):
+    line = content.decode().partition("\n")[0]
+    if not line.startswith(PROFILE_HEADER):
+        raise ValueError("Existing axis profile has no recognized source")
+    name = str(relative_file(line[len(PROFILE_HEADER) :]))
+    return name
+
+
+def source_name(active, content):
+    if active.name in PROFILE_NAMES.values():
+        if content.startswith(PROFILE_HEADER.encode()):
+            return profile_origin(content)
+        if PROFILE_NAMES[axis_count(content.decode())] != active.name:
+            raise ValueError("Active preset filename does not match its axis count")
+    return active.name
+
+
+def preset_template(filename):
+    return (Path(__file__).resolve().parent / "templates" / filename).read_bytes()
+
+
+class MissingProfileHal(ValueError):
+    def __init__(self, ini):
+        super().__init__("此方案尚未配置机床 HAL")
+        self.axes = "".join(parse_ini(ini).get("TRAJ", "COORDINATES").split()).upper()
+
+
+def stock_presets(files, ini_name, counts):
+    """Build only the named presets for a hash-recognized stock migration."""
+    result = {}
+    base = files[ini_name].decode()
+    hal = {name: files[name].decode() for name in hal_files(base)}
+    for count in counts:
+        name = PROFILE_NAMES[count]
+        try:
+            text, generated = generate(base, hal, count)
+        except (ValueError, configparser.Error):
+            content = preset_template(name)
+        else:
+            content = text.encode()
+            result.update({key: value.encode() for key, value in generated.items()})
+        result[name] = (PROFILE_HEADER + ini_name + "\n").encode() + content
+    return result
+
+
 def migration_base(files, ini_name):
     """Recover a verified axis-settings base for legacy migration recognition.
 
     The caller owns protected file reads and validates the recovered base against
     the original migration manifest. No active machine files are changed here.
     """
+    files = dict(files)
+    profile_hal = set()
+    for count, name in PROFILE_NAMES.items():
+        if name in files:
+            if (
+                profile_origin(files[name]) != ini_name
+                or axis_count(files[name].decode()) != count
+            ):
+                raise ValueError("Unexpected managed axis profile")
+            if "[HAL]" in files[name].decode():
+                profile_hal.update(hal_files(files[name].decode()))
+            del files[name]
+    for name, data in list(files.items()):
+        if name.startswith(".axis-settings-") and name.endswith(".hal"):
+            if name != ".axis-settings-" + hashlib.sha256(data).hexdigest() + ".hal":
+                raise ValueError("Generated axis-settings HAL changed")
+            if name in profile_hal and ".axis-settings-source.json" not in files:
+                del files[name]
     marker = ".axis-settings-source.json"
     if marker not in files:
         return files
@@ -131,12 +199,50 @@ class AxisProfileStore:
         return path, content, launcher_bytes
 
     def prepare(self, count):
-        path, current, launcher = self.current()
+        active, current, launcher = self.current()
+        path = active.with_name(source_name(active, current))
+        target = path.with_name(PROFILE_NAMES[count])
+        try:
+            preset = trusted_read(target)
+        except FileNotFoundError:
+            preset = None
+        if preset is not None:
+            text = preset.decode()
+            same_source = target == path or profile_origin(preset) == path.name
+            if not same_source or axis_count(text) != count:
+                raise ValueError(
+                    "Saved profile does not match this machine or axis count"
+                )
+            if "[HAL]" not in text:
+                raise MissingProfileHal(text)
+            hal = {}
+            for name in hal_files(text):
+                data = trusted_read(path.parent / relative_file(name))
+                if (
+                    name.startswith(".axis-settings-")
+                    and name
+                    != ".axis-settings-" + hashlib.sha256(data).hexdigest() + ".hal"
+                ):
+                    raise ValueError("Generated axis-settings HAL changed")
+                hal[name] = data
+            fingerprint = hashlib.sha256(launcher + b"\0" + current + b"\0" + preset)
+            for name, data in sorted(hal.items()):
+                fingerprint.update(name.encode() + b"\0" + data)
+            return {
+                "revision": fingerprint.hexdigest(),
+                "path": target,
+                "ini": preset,
+                "hal": {},
+                "exists": True,
+            }
+        active_content = current
+        current = trusted_read(path)
         current_hash = hashlib.sha256(current).hexdigest()
         base = current.decode("utf-8")
         saved_bytes = b""
         saved_path = path.with_name(".axis-settings-source.json")
-        if axis_count(base) != 3:
+        source_count = axis_count(base)
+        if source_count != 3 and source_count != count:
             saved_bytes = trusted_read(saved_path)
             saved = json.loads(saved_bytes)
             if (
@@ -174,10 +280,16 @@ class AxisProfileStore:
                 raise ValueError(
                     "Base HAL changed after switching; no changes were overwritten"
                 )
-        generated_ini, generated_hal = generate(
-            base, {name: data.decode("utf-8") for name, data in files.items()}, count
-        )
-        if len(generated_ini.encode()) > 65536 or any(
+        if source_count == count and count != 3:
+            generated_ini, generated_hal = base, {}
+        else:
+            generated_ini, generated_hal = generate(
+                base,
+                {name: data.decode("utf-8") for name, data in files.items()},
+                count,
+            )
+        ini = (PROFILE_HEADER + path.name + "\n" + generated_ini).encode()
+        if len(ini) > 65536 or any(
             len(text.encode()) > 262144 for text in generated_hal.values()
         ):
             raise ValueError(
@@ -191,37 +303,73 @@ class AxisProfileStore:
             + current
             + b"\0"
             + saved_bytes
+            + b"\0"
+            + active_content
         )
         for name, data in sorted({**files, **active_generated}.items()):
             fingerprint.update(name.encode() + b"\0" + data + b"\0")
-        # Preserve the base automatically; users never supply alternate INI/HAL files.
-        # Both hashes allow recovery if writing the final INI is interrupted.
-        snapshot = {
-            "schema_version": 1,
-            "ini": path.name,
-            "base_ini": base,
-            "accepted_ini_hashes": [
-                current_hash,
-                hashlib.sha256(generated_ini.encode()).hexdigest(),
-            ],
-            "hal_hashes": {
-                name: hashlib.sha256(data).hexdigest() for name, data in files.items()
-            },
-        }
         return {
             "revision": fingerprint.hexdigest(),
-            "axis_count": count,
-            "path": path,
-            "ini": generated_ini.encode(),
+            "path": target,
+            "ini": ini,
             "hal": generated_hal,
-            "snapshot": snapshot,
+            "exists": False,
         }
+
+    def seed(self):
+        try:
+            active, content, _ = self.current()
+        except (FileNotFoundError, TypeError, ValueError):
+            return
+        origin = source_name(active, content)
+        for count, filename in PROFILE_NAMES.items():
+            target = active.with_name(filename)
+            try:
+                prepared = self.prepare(count)
+            except (ValueError, FileNotFoundError, KeyError, configparser.Error):
+                try:
+                    target.lstat()
+                except FileNotFoundError:
+                    template = preset_template(filename)
+                    prepared = {
+                        "path": target,
+                        "ini": (PROFILE_HEADER + origin + "\n").encode() + template,
+                        "hal": {},
+                        "exists": False,
+                    }
+                else:
+                    continue
+            self.write_preset(prepared)
+
+    @staticmethod
+    def write_preset(prepared):
+        if prepared["exists"]:
+            return
+        path = prepared["path"]
+        for name, content in prepared["hal"].items():
+            target = path.parent / relative_file(name)
+            try:
+                existing = trusted_read(target)
+            except FileNotFoundError:
+                atomic_bytes(target, content.encode())
+            else:
+                if existing != content.encode():
+                    raise ValueError("Generated HAL content changed unexpectedly")
+        subprocess.run(
+            [HELPER, "seed-axis", path.name],
+            input=prepared["ini"],
+            env=ENV,
+            check=True,
+            timeout=20,
+        )
 
     def status(self):
         profiles = []
         for count, axes in AXES.items():
             try:
-                self.prepare(count)
+                prepared = self.prepare(count)
+                ini = parse_ini(prepared["ini"].decode())
+                axes = "".join(ini.get("TRAJ", "COORDINATES").split()).upper()
                 profiles.append(
                     {"axis_count": count, "axes": axes, "available": True, "reason": ""}
                 )
@@ -232,6 +380,8 @@ class AxisProfileStore:
                 TypeError,
                 configparser.Error,
             ) as error:
+                if isinstance(error, MissingProfileHal):
+                    axes = error.axes
                 profiles.append(
                     {
                         "axis_count": count,
@@ -241,7 +391,7 @@ class AxisProfileStore:
                     }
                 )
         try:
-            _, current, _ = self.current()
+            active, current, _ = self.current()
             configured = axis_count(current.decode("utf-8"))
         except (OSError, ValueError, KeyError, TypeError, configparser.Error):
             configured = None
@@ -250,9 +400,12 @@ class AxisProfileStore:
             "component": "axis-profile",
             "profiles": profiles,
             "configured_axis_count": configured,
+            "selected_axis_count": configured
+            if configured and active.name == PROFILE_NAMES[configured]
+            else None,
         }
 
-    def apply(self, count, expected_revision):
+    def apply(self, count, expected_revision, parameters=b""):
         # FD4 is the maintenance guard's live update lock; keep it open until exit.
         info = os.fstat(4)
         target = UPDATE_LOCK.lstat()
@@ -284,22 +437,30 @@ class AxisProfileStore:
             self.require_stopped()
             if self.prepare(count)["revision"] != expected_revision:
                 raise ValueError("Profile changed during backup")
+            if not prepared["exists"]:
+                self.seed()
             path = prepared["path"]
-            # New HAL files are content-addressed. The current INI is the single
-            # atomic commit point and never references partially written content.
-            for name, content in prepared["hal"].items():
-                target = path.parent / relative_file(name)
-                try:
-                    existing = trusted_read(target)
-                except FileNotFoundError:
-                    atomic_bytes(target, content.encode())
-                else:
-                    if existing != content.encode():
-                        raise ValueError("Generated HAL content changed unexpectedly")
-            atomic_json(
-                path.with_name(".axis-settings-source.json"), prepared["snapshot"]
-            )
-            atomic_bytes(path, prepared["ini"])
+            if trusted_read(path) != prepared["ini"]:
+                raise ValueError("Profile changed during initialization")
+            if parameters:
+                _, active, _ = self.current()
+                if axis_count(active.decode()) != count:
+                    raise ValueError(
+                        "Selected machine profile changed; reopen before saving"
+                    )
+                subprocess.run(
+                    [HELPER, "commit-parameters", path.name],
+                    input=parameters,
+                    env=ENV,
+                    check=True,
+                    timeout=20,
+                )
+            active_path, _, content = self.current()
+            if path == active_path:
+                return
+            config = json.loads(content)
+            config["ini"] = str(path)
+            atomic_json(CONFIG / "launcher.json", config)
 
     @staticmethod
     def require_stopped():
@@ -368,6 +529,8 @@ def install_integration():
     sources = Path(__file__).resolve().parent
     destinations = {
         "betterlinuxcnc-axis-profile@.service": Path("/usr/lib/systemd/system"),
+        "betterlinuxcnc-axis-parameters.socket": Path("/usr/lib/systemd/system"),
+        "betterlinuxcnc-axis-parameters@.service": Path("/usr/lib/systemd/system"),
         "00-betterlinuxcnc-axis-settings.rules": Path("/usr/share/polkit-1/rules.d"),
     }
     if not any((sources / name).exists() for name in destinations):
@@ -469,7 +632,10 @@ def run(operation, count=None, revision=None):
     if operation == "prepare-system":
         return {"revision": store.prepare(count)["revision"]}
     if operation == "apply-system":
-        store.apply(count, revision)
+        parameters = sys.stdin.buffer.read(16385)
+        if len(parameters) > 16384:
+            raise ValueError("Axis parameter request exceeds limit")
+        store.apply(count, revision, parameters)
         return {"phase": "configured", "axis_count": count}
     if operation != "switch-system":
         raise ValueError("Unknown axis-profile operation")

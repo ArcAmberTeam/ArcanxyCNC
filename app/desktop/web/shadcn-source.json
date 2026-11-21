@@ -1,0 +1,30 @@
+{
+  "project": "shadcn-vue",
+  "repository": "https://github.com/unovue/shadcn-vue",
+  "registry": "https://www.shadcn-vue.com",
+  "cliVersion": "2.9.0",
+  "style": "new-york",
+  "license": "MIT",
+  "licenseFile": "SHADCN-LICENSE",
+  "components": [
+    "button",
+    "input",
+    "switch",
+    "tabs",
+    "dialog",
+    "label",
+    "sidebar",
+    "sheet",
+    "tooltip",
+    "skeleton",
+    "separator"
+  ],
+  "localAdaptations": [
+    "Class composition imports use the local UI classes module.",
+    "The switch uses a semantic light-green checked-state token.",
+    "The application supplies a light theme with blue accents and rounded controls.",
+    "Sidebar consumes sheet components through their public entry point.",
+    "Sidebar keyboard shortcuts can be disabled for the fixed workspace sidebar.",
+    "Floating sidebars use a rounded translucent glass surface with a soft center tint and fine edge highlights."
+  ]
+}
