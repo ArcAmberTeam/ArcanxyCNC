@@ -63,6 +63,8 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
     await page.keyboard.up('Space')
     await expect.poll(() => jogging).toBe(false)
     await expect(button).toBeEnabled()
+    await button.focus()
+    await expect(button).toBeFocused()
     await page.keyboard.down('Space')
     await expect.poll(() => commands.filter(item => item.action === 'jog.start').length).toBe(2)
     await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].blur())

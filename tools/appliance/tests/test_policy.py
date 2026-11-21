@@ -132,9 +132,8 @@ class PolicyTests(unittest.TestCase):
             policy.install(root)
             path = root / "etc/sudoers"
             current = path.read_text()
-            path.write_text(
-                current.replace(policy.SUDO_ACCESS, policy.LEGACY_SUDO_ACCESS)
-            )
+            legacy = current.replace(policy.SUDO_ACCESS, policy.LEGACY_SUDO_ACCESS)
+            policy.write(path, legacy, 0o440)
             self.assertEqual(policy.upgrade_maintenance(root), "upgraded")
             self.assertEqual(path.read_text(), current)
 
