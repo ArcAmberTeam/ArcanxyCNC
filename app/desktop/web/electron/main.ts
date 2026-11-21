@@ -4,8 +4,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { ControllerSession } from './session.js'
 import { ManualController } from './manual-controller.js'
+import { MaintenanceTerminal } from './maintenance-terminal.js'
 import { getSystemInfo } from './system-info.js'
-import { adminSetupRequired, adminSudoStatus, enrollAdmin, setAdminSudo } from './admin-sudo.js'
+import { adminSetupRequired, adminSudoStatus, enrollAdmin, maintenanceStatus, setAdminSudo, setMaintenanceEnabled } from './admin-sudo.js'
 import { axisParameters } from './axis-parameters.js'
 import { axisProfileStatus, requestAxisProfile } from './maintenance.js'
 
@@ -18,13 +19,20 @@ const argument = (name: string) => {
 const session = new ControllerSession(argument('--socket') || process.env.BETTERCNC_SOCKET, argument('--ini') || argument('-ini'))
 let window: BrowserWindow | undefined
 let timer: NodeJS.Timeout | undefined
+const terminal = new MaintenanceTerminal(message => {
+  if (window && !window.webContents.isDestroyed()) window.webContents.send('terminal:event', message)
+})
 const controller = new ManualController(session, () => performance.now(),
   () => !!window && window.isFocused() && !window.isMinimized() && window.isVisible(),
   state => { if (window && !window.webContents.isDestroyed()) window.webContents.send('control:state', state) })
 
+function trustedSender(event: IpcMainEvent | IpcMainInvokeEvent) {
+  return !!window && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame
+    && event.senderFrame?.url === pathToFileURL(page).href
+}
+
 function authorize(event: IpcMainEvent | IpcMainInvokeEvent) {
-  if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame
-    || event.senderFrame?.url !== pathToFileURL(page).href) throw new Error('无效控制页面来源')
+  if (!trustedSender(event)) throw new Error('无效控制页面来源')
 }
 
 app.whenReady().then(async () => {
@@ -42,7 +50,21 @@ app.whenReady().then(async () => {
     await window.loadFile(join(dirname(page), 'kiosk-status.html'))
     return
   }
+  ipcMain.handle('terminal:open', (event, id, cols, rows) => { authorize(event); return terminal.open(id, cols, rows) })
+  ipcMain.on('terminal:enabled', (event, enabled) => { if (trustedSender(event)) terminal.setEnabled(enabled) })
+  ipcMain.on('terminal:input', (event, id, text) => { if (trustedSender(event)) terminal.input(id, text) })
+  ipcMain.on('terminal:resize', (event, id, cols, rows) => { if (trustedSender(event)) terminal.resize(id, cols, rows) })
+  ipcMain.on('terminal:consumed', (event, id, length) => { if (trustedSender(event)) terminal.consumed(id, length) })
+  ipcMain.on('terminal:close', (event, id) => { if (trustedSender(event)) terminal.close(id) })
   ipcMain.handle('system:info', event => { authorize(event); return getSystemInfo() })
+  ipcMain.handle('maintenance-account:status', event => { authorize(event); return maintenanceStatus() })
+  ipcMain.handle('maintenance-account:set', async (event, enabled: unknown, password: unknown) => {
+    authorize(event)
+    if (!window?.isFocused()) throw new Error('请在机床屏幕上操作')
+    const state = await setMaintenanceEnabled(enabled, password)
+    if (!state) terminal.disconnect(true)
+    return state
+  })
   ipcMain.handle('admin-sudo:status', event => { authorize(event); return adminSudoStatus() })
   ipcMain.handle('admin-sudo:setup-required', event => { authorize(event); return adminSetupRequired() })
   ipcMain.handle('admin-sudo:enroll', (event, maintenancePassword: unknown, password: unknown) => {
@@ -93,21 +115,21 @@ app.whenReady().then(async () => {
   window.removeMenu()
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', event => { void controller.stop(); event.preventDefault() })
-  window.webContents.on('did-start-loading', () => { void controller.stop() })
-  window.webContents.on('render-process-gone', () => controller.close())
+  window.webContents.on('did-start-loading', () => { terminal.setEnabled(false); void controller.stop() })
+  window.webContents.on('render-process-gone', () => { terminal.setEnabled(false); controller.close() })
   window.webContents.on('unresponsive', () => { void controller.stop() })
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   window.on('blur', () => { void controller.stop() })
   window.on('minimize', () => { void controller.stop() })
   window.on('hide', () => { void controller.stop() })
-  window.on('closed', () => { controller.close(); window = undefined })
+  window.on('closed', () => { terminal.setEnabled(false); controller.close(); window = undefined })
   await window.loadFile(page)
   timer = setInterval(() => { controller.watchdog(); void controller.poll() }, 100)
   void controller.poll()
   if (process.argv.includes('--smoke-test')) setTimeout(() => app.quit(), 1500)
 }).catch(error => { console.error(error); app.exit(1) })
 
-app.on('before-quit', () => { if (timer) clearInterval(timer); controller.close() })
+app.on('before-quit', () => { terminal.setEnabled(false); if (timer) clearInterval(timer); controller.close() })
 app.on('window-all-closed', () => app.quit())
 process.on('SIGTERM', () => app.quit())
 process.on('SIGINT', () => app.quit())

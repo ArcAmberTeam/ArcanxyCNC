@@ -5,12 +5,21 @@ test('first activation sets a password, later sudo changes use the existing pass
   await page.addInitScript(() => {
     let required = true
     let enabled = false
+    let maintenance = false
+    let maintenanceCredential = ''
     let credential = ''
     window.cncAdminSudo = {
+      maintenanceStatus: async () => maintenance,
+      setMaintenanceEnabled: async (target, password) => {
+        if (!target && password !== maintenanceCredential) throw new Error('运维密码验证失败')
+        maintenanceCredential = target ? password : ''
+        if (!target) enabled = false
+        return maintenance = target
+      },
       status: async () => enabled,
       needsSetup: async () => required,
       enroll: async (maintenancePassword, password) => {
-        if (!required || maintenancePassword !== 'fixture-maintenance ') throw new Error('运维密码验证失败')
+        if (!maintenance || !required || maintenancePassword !== maintenanceCredential) throw new Error('运维密码验证失败')
         required = false
         credential = password
         return enabled = true
@@ -24,6 +33,15 @@ test('first activation sets a password, later sudo changes use the existing pass
   await page.goto('/')
   await page.getByRole('button', { name: '设置', exact: true }).click()
   const toggle = page.getByRole('switch', { name: 'cnc_admin sudo' })
+  const operator = page.getByRole('switch', { name: 'cnc-maint 运维账户' })
+  await toggle.click()
+  await expect(page.getByRole('dialog')).toContainText('请先在开发者选项中启用 cnc-maint 运维账户并设置密码')
+  await page.getByRole('button', { name: '确定', exact: true }).click()
+  await operator.click()
+  await page.getByLabel('设置运维密码').fill('fixture-maintenance ')
+  await page.getByLabel('确认新密码').fill('fixture-maintenance ')
+  await page.getByRole('button', { name: '设置密码并开启' }).click()
+  await expect(operator).toBeChecked()
   await toggle.click()
   await page.getByLabel('cnc-maint 运维密码').fill('wrong-credential')
   await page.getByLabel('设置新密码').fill('fixture-password')
@@ -45,6 +63,10 @@ test('first activation sets a password, later sudo changes use the existing pass
   await page.getByLabel('管理员密码').fill('fixture-password')
   await page.getByRole('button', { name: '确认', exact: true }).click()
   await expect(toggle).not.toBeChecked()
+  await operator.click()
+  await page.getByLabel('当前运维密码').fill('fixture-maintenance ')
+  await page.getByRole('button', { name: '确认', exact: true }).click()
+  await expect(operator).not.toBeChecked()
 })
 
 test('settings displays the configured application version below ArcnOS', async ({ page }) => {

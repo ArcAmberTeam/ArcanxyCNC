@@ -15,6 +15,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+mod operator_screen;
 mod sudo_access;
 mod workspace;
 
@@ -189,15 +190,13 @@ fn bounded(mut input: impl Read) -> Result<String> {
 fn parse_request(request: &str) -> Result<(&str, &str)> {
     let (operation, password) = request.split_once('\n').ok_or("Invalid request")?;
     match operation {
-        "status" | "disable" | "admin-sudo-status" | "admin-setup-required"
-            if password.is_empty() =>
-        {
+        "status" | "admin-sudo-status" | "admin-setup-required" if password.is_empty() => {
             Ok((operation, password))
         }
         "admin-sudo-enroll" if sudo_access::enrollment::credentials(password).is_ok() => {
             Ok((operation, password))
         }
-        "admin-sudo-enable" | "admin-sudo-disable"
+        "disable" | "admin-sudo-enable" | "admin-sudo-disable"
             if !password.is_empty()
                 && password.len() <= 512
                 && !password.chars().any(char::is_control) =>
@@ -223,18 +222,28 @@ fn apply(operation: &str, password: &str) -> Result<bool> {
 fn maintenance(operation: &str, password: &str, operator_request: bool) -> Result<bool> {
     validate_account()?;
     let _guard = ledger()?;
-    if operator_request && matches!(operation, "enable" | "disable") {
-        sudo_access::enrollment::protect_maintenance_password()?;
-    }
     match operation {
         "status" => {}
-        "enable" => enable(password)?,
-        "disable" => disable()?,
+        "enable" => {
+            if operator_request && enabled()? {
+                sudo_access::authenticate("cnc-maint", password)?;
+            } else {
+                enable(password)?;
+            }
+            sudo_access::maintenance_available(true)?;
+        }
+        "disable" => {
+            if operator_request {
+                sudo_access::authenticate("cnc-maint", password)?;
+            }
+            sudo_access::maintenance_available(false)?;
+            disable()?;
+        }
         _ => return Err("Invalid operation".into()),
     }
     enabled()
 }
-fn peer(stream: &UnixStream) -> Result<u32> {
+fn peer(stream: &UnixStream) -> Result<Credentials> {
     let mut value = Credentials::default();
     let mut size = std::mem::size_of::<Credentials>() as u32;
     if unsafe {
@@ -250,18 +259,22 @@ fn peer(stream: &UnixStream) -> Result<u32> {
     {
         return Err("Peer credentials unavailable".into());
     }
-    Ok(value.uid)
+    Ok(value)
 }
 fn serve() -> Result<()> {
     let mut stream = unsafe { UnixStream::from_raw_fd(0) };
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
-    if peer(&stream)? != operator_uid()? {
+    let caller = peer(&stream)?;
+    if caller.uid != operator_uid()? {
         return Err("Caller is not the local operator".into());
     }
     let result = (|| {
         let text = bounded(&stream)?;
         let (op, password) = parse_request(&text)?;
+        if matches!(op, "enable" | "disable") {
+            operator_screen::require(&caller)?;
+        }
         apply(op, password).map(|state| socket_response(op, state))
     })();
     let reply = match result {
@@ -292,6 +305,7 @@ fn register() -> Result<()> {
     } else if marker != "revoked-v1\n" {
         return Err("Unknown policy ledger".into());
     }
+    sudo_access::maintenance_available(enabled()?)?;
     for (unit, suffix, contents) in [
         (UNIT, ".socket", SOCKET_UNIT),
         (UNIT, "@.service", SERVICE_UNIT),
@@ -366,7 +380,7 @@ pub fn run() -> Result<()> {
         }
         let password = if matches!(
             args[1].as_str(),
-            "enable" | "admin-sudo-enable" | "admin-sudo-disable" | "admin-sudo-enroll"
+            "enable" | "disable" | "admin-sudo-enable" | "admin-sudo-disable" | "admin-sudo-enroll"
         ) {
             bounded(io::stdin())?
         } else {
@@ -375,7 +389,7 @@ pub fn run() -> Result<()> {
         let request = format!("{}\n{}", args[1], password);
         parse_request(&request)?;
         let mut stream = UnixStream::connect(SOCKET)?;
-        if peer(&stream)? != 0 {
+        if peer(&stream)?.uid != 0 {
             return Err("Account service is not root".into());
         }
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
@@ -429,18 +443,18 @@ mod tests {
             "enable\nshort",
             "enable\npassword\nroot:secret",
             "enable\npassword:root",
-            "disable\nx",
+            "disable\n",
             "other\n",
         ] {
             assert!(parse_request(input).is_err());
         }
         assert!(parse_request("enable\ncorrect horse battery").is_ok());
-        assert!(parse_request("disable\n").is_ok());
+        assert!(parse_request("disable\ncurrent password").is_ok());
         assert!(bounded(&vec![b'x'; 1025][..]).is_err());
     }
     #[test]
     fn actual_socket_peer_is_observed() {
         let (a, _b) = UnixStream::pair().unwrap();
-        assert_eq!(peer(&a).unwrap(), unsafe { geteuid() });
+        assert_eq!(peer(&a).unwrap().uid, unsafe { geteuid() });
     }
 }

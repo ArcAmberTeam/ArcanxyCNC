@@ -48,7 +48,7 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
   try {
     desktop = await _electron.launch({ args: ['--no-sandbox', '.', '--socket', socketPath] })
     const page = await desktop.firstWindow()
-    expect(await page.evaluate(() => Object.keys(window.cncAdminSudo ?? {}).sort())).toEqual(['enroll', 'needsSetup', 'setEnabled', 'status'])
+    expect(await page.evaluate(() => Object.keys(window.cncAdminSudo ?? {}).sort())).toEqual(['enroll', 'maintenanceStatus', 'needsSetup', 'setEnabled', 'setMaintenanceEnabled', 'status'])
     await expect(page.evaluate(() => window.cncAdminSudo!.setEnabled(true, ''))).rejects.toThrow('管理员密码')
     await page.bringToFront()
     await page.getByRole('button', { name: '控制', exact: true }).click()

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(BetterLinuxCNC VERSION 26.11.21.2 LANGUAGES CXX)
+project(BetterLinuxCNC VERSION 26.11.21.3 LANGUAGES CXX)
 
 # Application composition only; the native LinuxCNC core is built from src/Makefile.
 include(cmake/ApplicationInstall.cmake)
@@ -87,7 +87,7 @@ endif()
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "python3 (>= 3.11), linuxcnc-uspace (>= 2.9), dbus-user-session, lightdm, xserver-xorg, x11-xserver-utils, openssh-server, sudo, passwd, procps, pci.ids")
 if(BETTERCNC_BUILD_SYSTEM_SERVICES)
     string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libgtk-3-0t64, libnss3, libasound2t64, libgbm1, libnotify4, libxss1, libxtst6, libdrm2, libxkbcommon0, libx11-xcb1")
-    string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", pamtester, polkitd, systemd, util-linux, ca-certificates, apt, dpkg, mesaflash, git, cmake, build-essential, pkg-config, rustup, libaio1t64, libmecab2, libnuma1, libtirpc3t64, libssl3t64, libstdc++6 (>= 14)")
+    string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", pamtester, polkitd, systemd, util-linux, bash-completion, ca-certificates, apt, dpkg, mesaflash, git, cmake, build-essential, pkg-config, rustup, libaio1t64, libmecab2, libnuma1, libtirpc3t64, libssl3t64, libstdc++6 (>= 14)")
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/conffiles" "/etc/betterlinuxcnc/updater.json\n")
     list(APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/conffiles")
 endif()
