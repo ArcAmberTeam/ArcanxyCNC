@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Cpu, Monitor, MemoryStick, Terminal } from '@lucide/vue'
+import { Switch } from '@/components/ui/switch'
 import { Card } from '@/components/ui/card'
 import type { AdminSudoBridge, SystemInfo } from '../../../bridge'
 import AdminSudoSettings from './AdminSudoSettings.vue'
 
-const props = defineProps<{ version: string; loadInfo: () => Promise<SystemInfo>; adminSudo?: AdminSudoBridge }>()
+const props = defineProps<{ version: string; loadInfo: () => Promise<SystemInfo>; adminSudo?: AdminSudoBridge; terminalEnabled: boolean }>()
+const emit = defineEmits<{ 'update:terminalEnabled': [enabled: boolean] }>()
 const snapshot = ref<SystemInfo | null>(null)
 const loading = ref(false)
 let active = false
@@ -60,7 +62,16 @@ onUnmounted(() => { active = false; if (timer) clearTimeout(timer); document.rem
           </div>
         </dl>
       </Card>
-      <AdminSudoSettings :bridge="adminSudo" />
+      <section aria-label="开发者选项" class="mt-6">
+        <h2 class="mb-2 px-2 text-base font-semibold">开发者选项</h2>
+        <Card>
+          <AdminSudoSettings :bridge="adminSudo" />
+          <div class="flex items-center justify-between gap-4 py-2">
+            <span>启用终端</span>
+            <Switch aria-label="启用终端" :model-value="terminalEnabled" @update:model-value="emit('update:terminalEnabled', $event)" />
+          </div>
+        </Card>
+      </section>
     </div>
   </section>
 </template>

@@ -12,6 +12,7 @@ use std::process::Stdio;
 pub(super) mod enrollment;
 
 const POLICY: &str = "/etc/betterlinuxcnc/cnc-admin-sudo";
+const SAVED_EXPIRY: &str = "/var/lib/betterlinuxcnc/cnc-admin-suspended-expiry";
 const CLOSED: &str = "# Managed cnc_admin sudo authorization; closed.\n";
 const OPEN: &str = "Defaults:cnc_admin timestamp_timeout=0\ncnc_admin ALL=(ALL:ALL) PASSWD: ALL\n";
 const PAM: &str = "/etc/pam.d/betterlinuxcnc-admin";
@@ -100,7 +101,7 @@ fn replace_file(path: &str, content: &str, mode: u32) -> Result<()> {
     result
 }
 
-fn authenticate(account: &str, password: &str) -> Result<()> {
+pub(super) fn authenticate(account: &str, password: &str) -> Result<()> {
     if managed_file(PAM)?.as_deref() != Some(PAM_STACK) {
         return Err("Admin authentication policy unavailable".into());
     }
@@ -138,7 +139,15 @@ fn active_policy() -> Result<bool> {
 }
 
 pub(super) fn request(desired: Option<bool>, password: &str) -> Result<bool> {
+    let _maintenance_guard = crate::ledger()?;
     let _guard = lock()?;
+    if !crate::enabled()? {
+        return if desired.is_none() {
+            Ok(false)
+        } else {
+            Err("Maintenance account disabled".into())
+        };
+    }
     let enabled = active_policy()?;
     if let Some(desired) = desired {
         // Authenticate every change, including retries and requests to turn sudo off.
@@ -152,6 +161,47 @@ pub(super) fn request(desired: Option<bool>, password: &str) -> Result<bool> {
         return Ok(desired);
     }
     Ok(enabled)
+}
+
+// Called while holding the maintenance ledger. Preserve the administrator password.
+pub(super) fn maintenance_available(available: bool) -> Result<()> {
+    let _guard = lock()?;
+    crate::validate_identity("cnc_admin", "/var/lib/betterlinuxcnc/admin")?;
+    if !available && policy_state()? == Some(true) {
+        replace_file(POLICY, CLOSED, 0o440)?;
+    }
+    let shadow = fs::read_to_string("/etc/shadow")?;
+    let expiry = shadow
+        .lines()
+        .find_map(|line| line.strip_prefix("cnc_admin:"))
+        .and_then(|fields| fields.split(':').nth(6))
+        .ok_or("Missing administrator expiry")?;
+    if !available && expiry != "1" {
+        replace_file(SAVED_EXPIRY, &format!("{expiry}\n"), 0o600)?;
+        return fixed("/usr/sbin/usermod", &["--expiredate", "1", "cnc_admin"]);
+    }
+    if available {
+        if let Some(saved) = managed_file(SAVED_EXPIRY)? {
+            let previous = saved
+                .strip_suffix('\n')
+                .ok_or("Invalid saved account expiry")?;
+            if !matches!(previous, "" | "-1") && previous.parse::<u32>().is_err() {
+                return Err("Invalid saved account expiry".into());
+            }
+            if expiry == "1" {
+                fixed(
+                    "/usr/sbin/usermod",
+                    &[
+                        "--expiredate",
+                        if previous == "-1" { "" } else { previous },
+                        "cnc_admin",
+                    ],
+                )?;
+            }
+            fs::remove_file(SAVED_EXPIRY)?;
+        }
+    }
+    Ok(())
 }
 
 fn old_grant(content: &str) -> bool {

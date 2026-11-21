@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { OctagonX, Play } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,7 +13,8 @@ import {
 import { workspaceSections, type WorkspaceSection } from './navigation'
 
 const activeSection = defineModel<WorkspaceSection>({ required: true })
-defineProps<{ canEstop: boolean; startDisabled: boolean }>()
+const props = defineProps<{ canEstop: boolean; startDisabled: boolean; terminalEnabled: boolean }>()
+const visibleSections = computed(() => workspaceSections.filter(section => section.id !== 'terminal' || props.terminalEnabled))
 const emit = defineEmits<{ startCycle: []; emergencyStop: [] }>()
 </script>
 
@@ -27,7 +29,7 @@ const emit = defineEmits<{ startCycle: []; emergencyStop: [] }>()
     <SidebarContent class="px-3 pt-4">
       <nav aria-label="主导航">
         <SidebarMenu class="gap-1.5">
-          <SidebarMenuItem v-for="section in workspaceSections" :key="section.id">
+          <SidebarMenuItem v-for="section in visibleSections" :key="section.id">
             <SidebarMenuButton
               type="button"
               variant="workspace"

@@ -38,7 +38,7 @@ fn pristine_account() -> Result<bool> {
     if !output.status.success() || fields.len() != 9 || fields[0] != "cnc_admin" {
         return Err("Administrator shadow entry unavailable".into());
     }
-    Ok(fields[1] == "!" && matches!(fields[7], "" | "-1"))
+    Ok(fields[1] == "!" && matches!(fields[7], "" | "-1" | "1"))
 }
 
 // The caller holds the same lock used for password enrollment and sudo changes.
@@ -72,17 +72,6 @@ fn eligible() -> Result<bool> {
 pub(crate) fn required() -> Result<bool> {
     let _guard = lock()?;
     Ok(!active_policy()? && eligible()?)
-}
-
-// Called under the maintenance ledger lock, independently of kiosk activation.
-pub(crate) fn protect_maintenance_password() -> Result<()> {
-    let _guard = lock()?;
-    if record()?.as_deref() != Some(COMPLETE) {
-        return Err(
-            "Complete administrator setup before replacing the maintenance credential".into(),
-        );
-    }
-    Ok(())
 }
 
 pub(crate) fn credentials(input: &str) -> Result<(&str, &str)> {

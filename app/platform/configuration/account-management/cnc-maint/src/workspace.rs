@@ -61,7 +61,7 @@ pub(super) fn provision() -> Result<()> {
 }
 pub(super) fn serve_install() -> Result<()> {
     let mut stream = unsafe { UnixStream::from_raw_fd(0) };
-    if peer(&stream)? != identity()?.0 || !enabled()? {
+    if peer(&stream)?.uid != identity()?.0 || !enabled()? {
         return Err("Enabled maintenance account required".into());
     }
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;

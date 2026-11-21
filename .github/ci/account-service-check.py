@@ -93,8 +93,7 @@ with socket.socket(socket.AF_UNIX) as connection:
         denied = subprocess.run(["runuser", "-u", "linuxcnc", "--", "/usr/bin/python3", "-c", probe, build_socket, "denied"], capture_output=True)
         assert denied.returncode != 0
         verify_sudo_access(helper, password)
-        assert request("enable", secrets.token_urlsafe(32)) is True
-        assert request("disable") is False
+        run(str(helper), "disable")
         upload("denied")
         assert request("status") is False
         assert Path("/usr/lib/systemd/system/betterlinuxcnc-cnc-maint@.service").read_text().find("NoNewPrivileges=yes") >= 0
@@ -162,13 +161,14 @@ def verify_sudo_access(helper, maintenance_password):
         assert record.read_text() == "complete\n"
         elevate(True)
         run(str(helper), "disable")
-        assert switch("status") is True
+        assert switch("status") is False
+        elevate(False)
+        switch("enable", admin_password, allowed=False)
         run(str(helper), "provision")
-        assert switch("status") is True
+        assert switch("status") is False
         switch("disable", maintenance_password, allowed=False)
-        assert switch("status") is True
-        assert switch("disable", admin_password) is False
         run(str(helper), "enable", input=maintenance_password)
+        assert switch("status") is False
         switch("enroll", f"{maintenance_password}\n{secrets.token_urlsafe(32)}", allowed=False)
         assert switch("enable", admin_password) is True
         assert switch("disable", admin_password) is False

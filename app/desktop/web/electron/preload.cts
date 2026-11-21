@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AdminSudoBridge, AxisProfileBridge, ControlBridge, ControlState, JogRequest, SystemBridge } from '../bridge.js' with { "resolution-mode": "import" }
+import type { AdminSudoBridge, AxisProfileBridge, ControlBridge, ControlState, JogRequest, SystemBridge, TerminalBridge, TerminalEvent } from '../bridge.js' with { "resolution-mode": "import" }
 
 const bridge: ControlBridge = {
   getState: () => ipcRenderer.invoke('control:state'),
@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('cncControl', bridge)
 const systemBridge: SystemBridge = { getInfo: () => ipcRenderer.invoke('system:info') }
 contextBridge.exposeInMainWorld('cncSystem', systemBridge)
 const adminSudo: AdminSudoBridge = {
+  maintenanceStatus: () => ipcRenderer.invoke('maintenance-account:status'),
+  setMaintenanceEnabled: (enabled, password) => ipcRenderer.invoke('maintenance-account:set', enabled, password),
   status: () => ipcRenderer.invoke('admin-sudo:status'),
   needsSetup: () => ipcRenderer.invoke('admin-sudo:setup-required'),
   enroll: (maintenancePassword, password) => ipcRenderer.invoke('admin-sudo:enroll', maintenancePassword, password),
@@ -36,3 +38,18 @@ const axisProfiles: AxisProfileBridge = {
   request: count => ipcRenderer.invoke('axis-profile:request', count),
 }
 contextBridge.exposeInMainWorld('cncAxisProfiles', axisProfiles)
+
+const terminal: TerminalBridge = {
+  setEnabled: enabled => ipcRenderer.send('terminal:enabled', enabled),
+  open: (id, columns, rows) => ipcRenderer.invoke('terminal:open', id, columns, rows),
+  input: (id, text) => ipcRenderer.send('terminal:input', id, text),
+  resize: (id, columns, rows) => ipcRenderer.send('terminal:resize', id, columns, rows),
+  consumed: (id, length) => ipcRenderer.send('terminal:consumed', id, length),
+  close: id => ipcRenderer.send('terminal:close', id),
+  onEvent(callback) {
+    const receive = (_event: Electron.IpcRendererEvent, message: TerminalEvent) => callback(message)
+    ipcRenderer.on('terminal:event', receive)
+    return () => ipcRenderer.removeListener('terminal:event', receive)
+  },
+}
+contextBridge.exposeInMainWorld('cncTerminal', terminal)

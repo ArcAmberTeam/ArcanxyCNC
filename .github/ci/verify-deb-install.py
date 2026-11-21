@@ -150,7 +150,7 @@ def verify_maintenance_account():
         require(request("status")["enabled"] is True, "Installer could not provision maintenance credentials")
         before = password_digest()
         request("enable", secrets.token_urlsafe(32), success=False)
-        request("disable", success=False)
+        request("disable", secrets.token_urlsafe(32), success=False)
         require(password_digest() == before, "Operator replaced the bootstrap credential")
         run(helper, "enable", input=secrets.token_urlsafe(32))
         require(password_digest() != before, "Password did not change")

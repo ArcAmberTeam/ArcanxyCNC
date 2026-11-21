@@ -51,15 +51,33 @@ export interface SystemBridge {
   getInfo(): Promise<SystemInfo>
 }
 
+export const maintenanceRequiredMessage = '请先在开发者选项中启用 cnc-maint 运维账户并设置密码'
+
 export interface AdminSudoBridge {
+  maintenanceStatus(): Promise<boolean>
+  setMaintenanceEnabled(enabled: boolean, password: string): Promise<boolean>
   status(): Promise<boolean>
   needsSetup(): Promise<boolean>
   enroll(maintenancePassword: string, newPassword: string): Promise<boolean>
   setEnabled(enabled: boolean, password: string): Promise<boolean>
 }
 
+export type TerminalEvent =
+  | { id: string; kind: 'data'; text: string }
+  | { id: string; kind: 'exit'; code: number; maintenanceDisabled?: boolean }
+
+export interface TerminalBridge {
+  setEnabled(enabled: boolean): void
+  open(id: string, columns: number, rows: number): Promise<void>
+  input(id: string, text: string): void
+  resize(id: string, columns: number, rows: number): void
+  consumed(id: string, length: number): void
+  close(id: string): void
+  onEvent(listener: (event: TerminalEvent) => void): () => void
+}
+
 declare global {
-  interface Window { cncSystem?: SystemBridge; cncAxisProfiles?: AxisProfileBridge; cncAdminSudo?: AdminSudoBridge }
+  interface Window { cncTerminal?: TerminalBridge; cncSystem?: SystemBridge; cncAxisProfiles?: AxisProfileBridge; cncAdminSudo?: AdminSudoBridge }
 }
 
 export interface MachineReadings {
