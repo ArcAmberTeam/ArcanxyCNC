@@ -136,7 +136,7 @@ export interface ControlBridge {
   chooseProgram(): Promise<void>
   startCycle(file: string): Promise<void>
   emergencyStop(): Promise<void>
-  resetEmergencyStop(): Promise<void>
+  resetEmergencyStop(confirmed: true): Promise<void>
   heartbeat(): void
 }
 

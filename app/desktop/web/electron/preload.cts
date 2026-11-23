@@ -17,7 +17,7 @@ const bridge: ControlBridge = {
   chooseProgram: () => ipcRenderer.invoke('control:choose-program'),
   startCycle: file => ipcRenderer.invoke('control:cycle', file),
   emergencyStop: () => ipcRenderer.invoke('control:estop'),
-  resetEmergencyStop: () => ipcRenderer.invoke('control:estop-reset'),
+  resetEmergencyStop: confirmed => ipcRenderer.invoke('control:estop-reset', confirmed),
   heartbeat: () => ipcRenderer.send('control:heartbeat'),
   onState(callback: (state: ControlState) => void) {
     stateListeners.add(callback)

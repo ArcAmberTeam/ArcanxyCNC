@@ -12,9 +12,11 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
   let jogging = false
   let powered = false
   let estop = false
+  let externalEstop = false
+  let commandState = 'idle'
   const snapshot = () => ({
     connected: true, axes: ['X', 'Y', 'Z'], motionMode: 'world', powered, estop,
-    linearUnits: 1, angularUnits: 1, commandState: 'idle',
+    linearUnits: 1, angularUnits: 1, commandState,
     capabilities: { 'jog.start': powered && !jogging, 'machine.power-and-home': !estop && !jogging, 'machine.estop': true },
     axisLimits: Object.fromEntries(['X', 'Y', 'Z'].map(name => [name, { maxVelocity: 10 }])),
   })
@@ -35,7 +37,8 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
           if (request.params.action === 'jog.start') jogging = true
           if (['jog.stop', 'machine.estop'].includes(request.params.action)) jogging = false
           if (request.params.action === 'machine.estop') {
-            estop = request.params.payload.enabled
+            estop = request.params.payload.enabled || externalEstop
+            commandState = externalEstop && !request.params.payload.enabled ? 'sent' : 'completed'
             if (estop) powered = false
           }
           result = { accepted: true, snapshot: snapshot() }
@@ -94,14 +97,36 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
     await page.bringToFront()
     const stop = page.getByRole('button', { name: '急停', exact: true })
     const reset = page.getByRole('button', { name: '解除急停', exact: true })
+    const resetDialog = page.getByRole('dialog', { name: '确认解除急停' })
     const beforeEstop = commands.length
     await stop.click()
     await expect(reset).toBeEnabled()
     await expect(home).toBeDisabled()
     await reset.click()
+    await expect(resetDialog).toContainText('请确认机床无异常')
+    await resetDialog.getByRole('button', { name: '取消' }).click()
+    expect(commands.slice(beforeEstop)).toEqual([{ action: 'machine.estop', payload: { enabled: true } }])
+    await reset.click()
+    estop = false
+    await expect(resetDialog).toBeHidden()
+    await expect(stop).toBeEnabled()
+    estop = true
+    externalEstop = true
+    await reset.click()
+    await resetDialog.getByRole('button', { name: '确认解除急停' }).click()
+    await expect(page.getByRole('button', { name: '等待复位' })).toBeDisabled()
+    commandState = 'unknown'
+    const blocked = page.getByRole('dialog', { name: /机床仍处于急停/ })
+    await expect(blocked).toContainText('请检查外部急停输入')
+    await blocked.getByRole('button', { name: '确定' }).click()
+    await expect(reset).toBeEnabled()
+    externalEstop = false
+    await reset.click()
+    await resetDialog.getByRole('button', { name: '确认解除急停' }).click()
     await expect(stop).toBeEnabled()
     expect(commands.slice(beforeEstop)).toEqual([
       { action: 'machine.estop', payload: { enabled: true } },
+      { action: 'machine.estop', payload: { enabled: false } },
       { action: 'machine.estop', payload: { enabled: false } },
     ])
     expect(powered).toBe(false)

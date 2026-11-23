@@ -13,9 +13,13 @@ import {
 import { workspaceSections, type WorkspaceSection } from './navigation'
 
 const activeSection = defineModel<WorkspaceSection>({ required: true })
-const props = defineProps<{ canEstop: boolean; estop: boolean | null; startDisabled: boolean; terminalEnabled: boolean }>()
+const props = defineProps<{ canEstop: boolean; estop: boolean | null; resetPending: boolean; startDisabled: boolean; terminalEnabled: boolean }>()
 const visibleSections = computed(() => workspaceSections.filter(section => section.id !== 'terminal' || props.terminalEnabled))
-const estopLabel = computed(() => props.estop === true ? '解除急停' : '急停')
+const waitingForReset = computed(() => props.estop === true && props.resetPending)
+const estopLabel = computed(() => {
+  if (waitingForReset.value) return '等待复位'
+  return props.estop === true ? '解除急停' : '急停'
+})
 const emit = defineEmits<{ startCycle: []; setEmergencyStop: [enabled: boolean] }>()
 </script>
 
@@ -60,7 +64,7 @@ const emit = defineEmits<{ startCycle: []; setEmergencyStop: [enabled: boolean] 
           :key="estopLabel"
           type="button"
           variant="destructive"
-          :disabled="!canEstop"
+          :disabled="!canEstop || waitingForReset"
           class="h-11 w-full gap-1.5 rounded-2xl p-0 disabled:opacity-60"
           @click="emit('setEmergencyStop', estop !== true)"
         >

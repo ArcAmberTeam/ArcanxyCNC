@@ -35,16 +35,14 @@ export function useControllerConnection() {
     bridge.heartbeat()
     await bridge.startCycle(state.value.programFile)
   }
-  async function setEmergencyStop(enabled: boolean) {
-    if (!bridge) return
-    error.value = ''
-    try {
-      if (enabled) await bridge.emergencyStop()
-      else {
-        bridge.heartbeat()
-        await bridge.resetEmergencyStop()
-      }
-    } catch (problem) { error.value = problem instanceof Error ? problem.message : String(problem) }
+  async function emergencyStop() {
+    if (!bridge) throw new Error('控制服务未连接')
+    await bridge.emergencyStop()
+  }
+  async function resetEmergencyStop(confirmed: true) {
+    if (!bridge) throw new Error('控制服务未连接')
+    bridge.heartbeat()
+    await bridge.resetEmergencyStop(confirmed)
   }
   async function homeAll(confirmed: true) {
     if (!bridge || !state.value.canHomeAll || submittingHome.value) return
@@ -90,6 +88,6 @@ export function useControllerConnection() {
     window.removeEventListener('pagehide', stop)
     document.removeEventListener('visibilitychange', hidden)
   })
-  return { state: readonly(state), error: readonly(error), start, stop, chooseProgram, startCycle, setEmergencyStop,
+  return { state: readonly(state), error: readonly(error), start, stop, chooseProgram, startCycle, emergencyStop, resetEmergencyStop,
     setMachineControl, setSpindle, homeAll, submittingHome: readonly(submittingHome), axisProfiles: window.cncAxisProfiles }
 }

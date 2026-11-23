@@ -5,7 +5,7 @@ import WorkspaceSidebar from './WorkspaceSidebar.vue'
 import { workspaceSections, type WorkspaceSection } from './navigation'
 
 const activeSection = ref<WorkspaceSection>('preview')
-const props = defineProps<{ canEstop: boolean; estop: boolean | null; startDisabled: boolean; terminalEnabled: boolean }>()
+const props = defineProps<{ canEstop: boolean; estop: boolean | null; resetPending: boolean; startDisabled: boolean; terminalEnabled: boolean }>()
 const emit = defineEmits<{ startCycle: []; setEmergencyStop: [enabled: boolean]; sectionChange: [] }>()
 watch(() => props.terminalEnabled, enabled => {
   if (!enabled && activeSection.value === 'terminal') activeSection.value = 'settings'
@@ -16,7 +16,7 @@ const sectionLabel = computed(() => workspaceSections.find(section => section.id
 
 <template>
   <SidebarProvider :open="true" :keyboard-shortcut="false" style="--sidebar-width: 8rem">
-    <WorkspaceSidebar v-model="activeSection" :terminal-enabled="terminalEnabled" :can-estop="canEstop" :estop="estop" :start-disabled="startDisabled"
+    <WorkspaceSidebar v-model="activeSection" :terminal-enabled="terminalEnabled" :can-estop="canEstop" :estop="estop" :reset-pending="resetPending" :start-disabled="startDisabled"
       @start-cycle="emit('startCycle')" @set-emergency-stop="emit('setEmergencyStop', $event)" />
     <main
       id="workspace-main"

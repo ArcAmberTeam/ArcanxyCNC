@@ -27,6 +27,8 @@ export class ManualController {
   private held = false
   private starting = false
   private submittingHome = false
+  private resetting = false
+  private checkResetFeedback?: () => void
   private stopping?: Promise<void>
   private polling = false
   private localCommandError = ''
@@ -42,7 +44,10 @@ export class ManualController {
 
   heartbeat() { if (!this.closed) this.heartbeatAt = this.now() }
   private fresh() { return !this.closed && this.focused() && this.now() - this.heartbeatAt < 350 }
-  private emit() { this.publish({ ...this.state }) }
+  private emit() {
+    this.checkResetFeedback?.()
+    this.publish({ ...this.state })
+  }
 
   private update(value: unknown) {
     const data = record(value)
@@ -200,9 +205,28 @@ export class ManualController {
     } catch (error) { this.disconnect(error); throw error }
   }
 
-  async resetEmergencyStop() {
-    await this.sendControl('machine.estop', { enabled: false },
-      () => this.state.canEstop && this.state.estop === true)
+  async resetEmergencyStop(confirmed: unknown) {
+    if (confirmed !== true) throw new Error('请先确认机床无异常')
+    if (this.resetting) throw new Error('正在等待急停复位反馈')
+    this.resetting = true
+    try {
+      await this.sendControl('machine.estop', { enabled: false },
+        () => this.state.canEstop && this.state.estop === true)
+      const deadline = this.now() + 12000
+      await new Promise<void>((resolve, reject) => {
+        this.checkResetFeedback = () => {
+          if (this.closed || this.state.estop === null) reject(new Error('机床状态不可用，无法确认急停是否解除'))
+          else if (!this.state.estop) resolve()
+          else if (this.state.commandState === 'error' || this.state.commandState === 'unknown' || this.now() >= deadline) {
+            reject(new Error('机床仍处于急停，请检查外部急停输入和当前机床配置。'))
+          }
+        }
+        this.checkResetFeedback()
+      })
+    } finally {
+      this.checkResetFeedback = undefined
+      this.resetting = false
+    }
   }
 
   get programDirectory() {
@@ -275,6 +299,7 @@ export class ManualController {
 
   close() {
     this.closed = true
+    this.checkResetFeedback?.()
     this.generation++
     this.held = false
     this.heartbeatAt = -Infinity

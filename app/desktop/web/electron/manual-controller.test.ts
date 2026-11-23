@@ -182,21 +182,44 @@ test('emergency stop asserts estop explicitly and never toggles it off', async (
   assert.deepEqual(peer.requests.at(-1)?.params, { action: 'machine.estop', payload: { enabled: true } })
 })
 
-test('reset requires fresh active estop feedback and waits for readback to change state', async () => {
+test('reset requires confirmation and fresh estop feedback, and sends only once until readback', async () => {
   const { controller, peer, advance } = await setup()
-  await assert.rejects(controller.resetEmergencyStop())
+  await assert.rejects(controller.resetEmergencyStop(true))
   peer.snapshot.estop = true
   await controller.poll()
-  await controller.resetEmergencyStop()
+  for (const missing of [false, undefined, 'true']) {
+    await assert.rejects(controller.resetEmergencyStop(missing), /确认机床无异常/)
+  }
+  const pending = controller.resetEmergencyStop(true)
+  await assert.rejects(controller.resetEmergencyStop(true), /正在等待/)
+  await controller.poll()
   assert.equal(controller.state.estop, true)
+  peer.snapshot.estop = false
+  await controller.poll()
+  await pending
+  peer.snapshot.estop = true
+  await controller.poll()
   advance(501)
   controller.heartbeat()
-  await assert.rejects(controller.resetEmergencyStop())
+  await assert.rejects(controller.resetEmergencyStop(true))
   controller.watchdog()
   assert.equal(controller.state.estop, null)
   assert.deepEqual(peer.requests.filter(item => item.method === 'command.execute').map(item => item.params), [
     { action: 'machine.estop', payload: { enabled: false } },
   ])
+})
+
+test('a stale snapshot after reset reports unknown feedback without sending another command', async () => {
+  const { controller, peer, advance } = await setup()
+  peer.snapshot.estop = true
+  await controller.poll()
+  const rejection = assert.rejects(controller.resetEmergencyStop(true), /无法确认急停是否解除/)
+  await controller.poll()
+  advance(501)
+  controller.watchdog()
+  await rejection
+  await controller.poll()
+  assert.equal(peer.requests.filter(item => item.method === 'command.execute').length, 1)
 })
 
 test('closing the window releases the connection and never reconnects', async () => {
