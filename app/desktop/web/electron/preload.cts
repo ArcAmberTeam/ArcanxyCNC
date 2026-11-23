@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AdminSudoBridge, AxisProfileBridge, ControlBridge, ControlState, JogRequest, SystemBridge, TerminalBridge, TerminalEvent } from '../bridge.js' with { "resolution-mode": "import" }
 
+const stateListeners = new Set<(state: ControlState) => void>()
+ipcRenderer.on('control:state', (_event, id: number, state: ControlState) => {
+  try { stateListeners.forEach(listener => listener(state)) }
+  finally { ipcRenderer.send('control:state-consumed', id) }
+})
 const bridge: ControlBridge = {
   getState: () => ipcRenderer.invoke('control:state'),
   homeAll: confirmed => ipcRenderer.invoke('control:home-all', confirmed),
@@ -15,9 +20,8 @@ const bridge: ControlBridge = {
   resetEmergencyStop: () => ipcRenderer.invoke('control:estop-reset'),
   heartbeat: () => ipcRenderer.send('control:heartbeat'),
   onState(callback: (state: ControlState) => void) {
-    const listener = (_event: Electron.IpcRendererEvent, state: ControlState) => callback(state)
-    ipcRenderer.on('control:state', listener)
-    return () => ipcRenderer.removeListener('control:state', listener)
+    stateListeners.add(callback)
+    return () => { stateListeners.delete(callback) }
   },
 }
 contextBridge.exposeInMainWorld('cncControl', bridge)

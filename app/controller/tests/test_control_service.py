@@ -404,9 +404,10 @@ class ControlServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_private_permissions_and_clean_shutdown(self):
         self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
-        await self.attached()
+        connection = await self.attached()
         self.stop.set()
-        await self.server
+        await asyncio.wait_for(self.server, 1)
+        self.assertEqual(await connection[0].read(1), b"")
         self.assertFalse(self.path.exists())
         self.assertTrue(self.controllers[0].closed)
 

@@ -29,6 +29,7 @@ export class ManualController {
   private submittingHome = false
   private stopping?: Promise<void>
   private polling = false
+  private localCommandError = ''
   private nextConnect = 0
   private closed = false
 
@@ -78,7 +79,7 @@ export class ManualController {
       canEstop: data.connected && capabilities['machine.estop'] === true,
       estop: data.connected && typeof data.estop === 'boolean' ? data.estop : null,
       jogging: this.held, activeAxes, axes, reason,
-      error: commandError || this.state.error,
+      error: commandError || this.localCommandError,
       commandState: typeof data.commandState === 'string' ? data.commandState : 'unknown',
     }
     this.emit()
@@ -92,8 +93,12 @@ export class ManualController {
     this.transport.close()
     this.nextConnect = this.now() + 1000
     this.state = offlineState('本地控制服务未连接')
-    this.state.error = error instanceof Error ? error.message : String(error)
-    if (error instanceof RemoteError && error.code === 'result_unknown') this.state.commandState = 'unknown'
+    if (error instanceof RemoteError && error.code === 'result_unknown') {
+      this.localCommandError = error.message
+      this.state.commandState = 'unknown'
+    }
+    const waiting = error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT'
+    this.state.error = this.localCommandError || (waiting ? '正在等待本机控制服务启动' : error instanceof Error ? error.message : String(error))
     this.emit()
   }
 
@@ -141,6 +146,7 @@ export class ManualController {
     const generation = ++this.generation
     this.held = true
     this.starting = true
+    this.localCommandError = ''
     this.state = { ...this.state, canJog: false, canHomeAll: false, jogging: true, error: '' }
     this.emit()
     try {
@@ -165,7 +171,8 @@ export class ManualController {
   }
 
   private report(error: unknown) {
-    this.state = { ...this.state, error: error instanceof Error ? error.message : String(error) }
+    this.localCommandError = error instanceof Error ? error.message : String(error)
+    this.state = { ...this.state, error: this.localCommandError }
     this.emit()
   }
 

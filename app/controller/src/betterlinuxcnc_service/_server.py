@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import contextlib
+import json
 import os
 import signal
 import socket
@@ -12,6 +13,8 @@ import tempfile
 from pathlib import Path
 
 from bettercnc_error_records import install_exception_hooks, report
+
+from bettercnc_controller import StatusReader
 
 from ._controller_runtime import ControllerRuntime
 from ._protocol import MAX_FRAME_BYTES, ProtocolError, decode, encode, health
@@ -52,11 +55,12 @@ async def serve(
 
     clients: set[asyncio.Task] = set()
     runtime = None
+    stopped = stop_event or asyncio.Event()
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
         assert task is not None
-        if len(clients) >= MAX_CLIENTS:
+        if stopped.is_set() or len(clients) >= MAX_CLIENTS:
             writer.close()
             await writer.wait_closed()
             return
@@ -121,13 +125,14 @@ async def serve(
         finally:
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)
-            await runtime.release(owner)
-            clients.discard(task)
-            writer.close()
-            with contextlib.suppress(ConnectionError):
-                await writer.wait_closed()
+            try:
+                await runtime.release(owner)
+            finally:
+                clients.discard(task)
+                writer.close()
+                with contextlib.suppress(ConnectionError):
+                    await writer.wait_closed()
 
-    stopped = stop_event or asyncio.Event()
     loop = asyncio.get_running_loop()
     signals = (signal.SIGINT, signal.SIGTERM) if stop_event is None else ()
     for sig in signals:
@@ -136,6 +141,7 @@ async def serve(
     # Bind ourselves: never unlink another service's endpoint on startup.
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     identity = None
+    server = None
     try:
         listener.bind(str(path))
         identity = path.lstat()
@@ -145,15 +151,20 @@ async def serve(
             ini_path, controller_factory, process_factory, status_reader_factory, cam_inbox
         )
         server = await asyncio.start_unix_server(handle, sock=listener, limit=MAX_FRAME_BYTES)
-        async with server:
-            print(f"Local controller service ready: {path}", flush=True)
-            await stopped.wait()
+        print(f"Local controller service ready: {path}", flush=True)
+        await stopped.wait()
     finally:
-        listener.close()
+        if server is not None:
+            server.close()
+        else:
+            listener.close()
         pending = list(clients)
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
+        if server is not None:
+            # Python 3.13 waits for accepted transports as well as the listener.
+            await server.wait_closed()
         if runtime is not None:
             await runtime.close()
         if identity is not None:
@@ -170,10 +181,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="BetterLinuxCNC local controller service")
     parser.add_argument("--socket", type=Path, default=default_socket())
     parser.add_argument("--ini", type=Path)
+    parser.add_argument("--probe-native", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--cam-inbox", type=Path, help="allow explicit CAM jobs from this private inbox"
     )
     args = parser.parse_args()
+    if args.probe_native:
+        reader = StatusReader(ini_path=args.ini)
+        snapshot = reader.poll()
+        if snapshot["connected"]:
+            snapshot = reader.poll()
+        print(json.dumps(snapshot, allow_nan=False))
+        return
     try:
         asyncio.run(
             serve(

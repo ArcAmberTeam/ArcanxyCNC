@@ -17,7 +17,6 @@ export function useControllerConnection() {
   function stop() { bridge?.stopJog() }
   function heartbeat() {
     if (document.visibilityState === 'visible' && document.hasFocus()) bridge?.heartbeat()
-    else stop()
   }
   function hidden() { if (document.visibilityState !== 'visible') stop() }
   async function start(request: JogRequest) {

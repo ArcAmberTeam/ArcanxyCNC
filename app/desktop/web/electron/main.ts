@@ -9,7 +9,12 @@ import { getSystemInfo } from './system-info.js'
 import { adminSetupRequired, adminSudoStatus, enrollAdmin, maintenanceStatus, setAdminSudo, setMaintenanceEnabled } from './admin-sudo.js'
 import { axisParameters } from './axis-parameters.js'
 import { axisProfileStatus, requestAxisProfile } from './maintenance.js'
+import type { ControlState } from '../bridge.js'
 
+const kiosk = process.argv.includes('--kiosk') || process.env.BETTERCNC_KIOSK === '1'
+if (process.platform === 'linux' && (kiosk || process.argv.includes('--kiosk-status'))) {
+  app.disableHardwareAcceleration()
+}
 const directory = dirname(fileURLToPath(import.meta.url))
 const page = join(directory, '../../dist/index.html')
 const argument = (name: string) => {
@@ -22,9 +27,24 @@ let timer: NodeJS.Timeout | undefined
 const terminal = new MaintenanceTerminal(message => {
   if (window && !window.webContents.isDestroyed()) window.webContents.send('terminal:event', message)
 })
+let listening = false
+let sequence = 0
+let inFlight: number | undefined
+let latest: ControlState | undefined
+
+function publishState(state: ControlState) {
+  if (!listening || !window || window.webContents.isDestroyed()) return
+  if (inFlight !== undefined) {
+    latest = state
+    return
+  }
+  inFlight = ++sequence
+  window.webContents.send('control:state', inFlight, state)
+}
+
 const controller = new ManualController(session, () => performance.now(),
   () => !!window && window.isFocused() && !window.isMinimized() && window.isVisible(),
-  state => { if (window && !window.webContents.isDestroyed()) window.webContents.send('control:state', state) })
+  publishState)
 
 function trustedSender(event: IpcMainEvent | IpcMainInvokeEvent) {
   return !!window && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame
@@ -82,7 +102,19 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('axis-profile:status', event => { authorize(event); return axisProfileStatus() })
   ipcMain.handle('axis-profile:request', (event, count: unknown) => { authorize(event); return requestAxisProfile(count) })
-  ipcMain.handle('control:state', event => { authorize(event); return controller.state })
+  ipcMain.handle('control:state', event => {
+    authorize(event)
+    return controller.state
+  })
+  ipcMain.on('control:state-consumed', (event, id: unknown) => {
+    if (!trustedSender(event) || inFlight === undefined || id !== inFlight) return
+    inFlight = undefined
+    if (latest) {
+      const state = latest
+      latest = undefined
+      publishState(state)
+    }
+  })
   ipcMain.handle('control:home-all', (event, confirmed: unknown) => { authorize(event); return controller.homeAll(confirmed) })
   ipcMain.handle('control:flood', (event, enabled: unknown) => { authorize(event); return controller.setFlood(enabled) })
   ipcMain.handle('control:spindle', (event, direction: unknown, rpm?: unknown) => { authorize(event); return controller.setSpindle(direction, rpm) })
@@ -110,13 +142,20 @@ app.whenReady().then(async () => {
     width: 1024, height: 632, minWidth: 760, minHeight: 600, backgroundColor: '#f5f5f7',
     title: 'BetterLinuxCNC', autoHideMenuBar: true,
     fullscreen: process.argv.includes('--fullscreen') || process.env.BETTERCNC_FULLSCREEN === '1',
-    kiosk: process.argv.includes('--kiosk') || process.env.BETTERCNC_KIOSK === '1',
+    kiosk,
     webPreferences: { preload: join(directory, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
   })
   window.removeMenu()
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', event => { void controller.stop(); event.preventDefault() })
-  window.webContents.on('did-start-loading', () => { terminal.setEnabled(false); void controller.stop() })
+  window.webContents.on('did-start-loading', () => {
+    listening = false
+    inFlight = undefined
+    latest = undefined
+    terminal.setEnabled(false)
+    void controller.stop()
+  })
+  window.webContents.on('dom-ready', () => { listening = true })
   window.webContents.on('render-process-gone', () => { terminal.setEnabled(false); controller.close() })
   window.webContents.on('unresponsive', () => { void controller.stop() })
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))

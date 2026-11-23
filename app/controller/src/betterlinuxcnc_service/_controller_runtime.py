@@ -14,6 +14,7 @@ from bettercnc_controller import Controller, StatusReader
 
 from ._preview_jobs import PreviewJobs
 from ._protocol import ProtocolError
+from ._startup_probe import StartupProbe
 from ._wire_snapshot import wire_snapshot
 
 JOG_LEASE_SECONDS = 0.6
@@ -33,6 +34,13 @@ class ControllerRuntime:
         self._factory = controller_factory or Controller
         self._status_factory = status_reader_factory or StatusReader
         self._status_reader = None
+        self._startup_probe = (
+            StartupProbe(ini_path)
+            if os.environ.get("BETTERCNC_MANAGED") == "1"
+            and controller_factory is None
+            and status_reader_factory is None
+            else None
+        )
         self._ini = ini_path
         self._cam_inbox = cam_inbox
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="linuxcnc-owner")
@@ -283,7 +291,23 @@ class ControllerRuntime:
         self._snapshot = controller.snapshot
         return {"job": result}
 
+    def _bootstrap_status(self):
+        if self._startup_probe is None:
+            return None
+        snapshot = self._startup_probe.poll()
+        if snapshot["connected"]:
+            self._startup_probe = None
+            return None
+        return snapshot
+
     async def handle(self, owner, method, params):
+        if self._startup_probe is not None:
+            waiting = await self._work(self._bootstrap_status)
+            if waiting is not None:
+                if method == "machine.status":
+                    self._params(params)
+                    return waiting
+                raise ProtocolError("status_unavailable", "正在等待 LinuxCNC 启动")
         if method in ("cam.jog.start", "cam.jog.keepalive", "cam.jog.stop"):
             self._params(
                 params,

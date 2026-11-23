@@ -38,10 +38,13 @@ class ServiceTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "private" / "control.sock"
         self.command = [sys.executable, "-m", "betterlinuxcnc_service", "--socket", str(self.path)]
-        self.process = subprocess.Popen(
-            self.command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
-        )
+        self.start_service()
         self.addCleanup(self.stop)
+
+    def start_service(self, env=None):
+        self.process = subprocess.Popen(
+            self.command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env
+        )
         deadline = time.monotonic() + 5
         # Binding creates the socket path before the service starts listening.
         while True:
@@ -145,6 +148,49 @@ class ServiceTests(unittest.TestCase):
         self.process.terminate()
         self.assertEqual(self.process.wait(timeout=5), 0)
         self.assertFalse(self.path.exists())
+
+    def test_managed_service_survives_a_native_binding_that_latches_early_failure(self):
+        self.stop()
+        root = Path(self.temp.name)
+        ready = root / "native-ready"
+        (root / "linuxcnc.py").write_text(
+            "from pathlib import Path\n"
+            "from test_controller import FakeLinuxCNC\n"
+            "vendor = FakeLinuxCNC()\n"
+            f"vendor.available = Path({str(ready)!r}).exists()\n"
+            "__getattr__ = lambda name: getattr(vendor, name)\n"
+        )
+        self.start_service(
+            dict(
+                os.environ,
+                BETTERCNC_MANAGED="1",
+                PYTHONPATH=os.pathsep.join((str(root), str(Path(__file__).resolve().parent))),
+                PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
+            )
+        )
+        with self.connect() as connection:
+
+            def status(request_id):
+                connection.sendall(
+                    frame(
+                        {
+                            "version": 2,
+                            "request_id": str(request_id),
+                            "method": "machine.status",
+                            "params": {},
+                        }
+                    )
+                )
+                return read_reply(connection)["result"]["connected"]
+
+            self.assertFalse(status(0))
+            ready.touch()
+            for attempt in range(1, 31):
+                if status(attempt):
+                    break
+                time.sleep(0.1)
+            else:
+                self.fail("observer stayed disconnected after native startup")
 
     def test_refuses_insecure_directory(self):
         unsafe = Path(self.temp.name) / "unsafe"

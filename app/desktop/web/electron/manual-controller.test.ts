@@ -156,7 +156,24 @@ test('lost command acknowledgement is never replayed after reconnect', async () 
   await controller.poll()
   assert.equal(peer.requests.filter(item => item.params.action === 'jog.start').length, 1)
   assert.equal(controller.state.jogging, false)
+  assert.equal(controller.state.error, 'Unknown command outcome')
   assert.equal(peer.requests.at(-1)?.params.jog_lease, false)
+})
+
+test('missing controller socket clears after a successful status read', async () => {
+  const { controller, peer, advance } = await setup()
+  peer.close()
+  const connect = peer.connect.bind(peer)
+  peer.connect = async () => { throw Object.assign(new Error('missing socket'), { code: 'ENOENT' }) }
+  await controller.poll()
+  assert.equal(controller.state.serviceConnected, false)
+  assert.equal(controller.state.error, '正在等待本机控制服务启动')
+  peer.connect = connect
+  advance(1001)
+  await controller.poll()
+  assert.equal(controller.state.serviceConnected, true)
+  assert.equal(controller.state.error, '')
+  assert.ok(peer.requests.every(item => item.method === 'session.status'))
 })
 
 test('emergency stop asserts estop explicitly and never toggles it off', async () => {
