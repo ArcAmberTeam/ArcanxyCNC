@@ -9,6 +9,7 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
   const socketPath = join(folder, 'control.sock')
   const commands: Array<{ action: string; payload: Record<string, unknown> }> = []
   const sockets = new Set<net.Socket>()
+  let closing = false
   let jogging = false
   let powered = false
   let estop = false
@@ -22,6 +23,9 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
   })
   const server = net.createServer(socket => {
     sockets.add(socket)
+    socket.on('error', (error: NodeJS.ErrnoException) => {
+      if (!closing || error.code !== 'ECONNRESET') throw error
+    })
     socket.on('close', () => sockets.delete(socket))
     let bytes: Buffer = Buffer.alloc(0)
     socket.on('data', chunk => {
@@ -132,6 +136,7 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
     expect(powered).toBe(false)
     expect(commands.some(item => ['machine.power', 'machine.home-all', 'motion.mode'].includes(item.action))).toBe(false)
   } finally {
+    closing = true
     await desktop?.close()
     sockets.forEach(socket => socket.destroy())
     await new Promise<void>(resolve => server.close(() => resolve()))
