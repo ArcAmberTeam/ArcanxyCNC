@@ -13,9 +13,10 @@ import {
 import { workspaceSections, type WorkspaceSection } from './navigation'
 
 const activeSection = defineModel<WorkspaceSection>({ required: true })
-const props = defineProps<{ canEstop: boolean; startDisabled: boolean; terminalEnabled: boolean }>()
+const props = defineProps<{ canEstop: boolean; estop: boolean | null; startDisabled: boolean; terminalEnabled: boolean }>()
 const visibleSections = computed(() => workspaceSections.filter(section => section.id !== 'terminal' || props.terminalEnabled))
-const emit = defineEmits<{ startCycle: []; emergencyStop: [] }>()
+const estopLabel = computed(() => props.estop === true ? '解除急停' : '急停')
+const emit = defineEmits<{ startCycle: []; setEmergencyStop: [enabled: boolean] }>()
 </script>
 
 <template>
@@ -54,23 +55,19 @@ const emit = defineEmits<{ startCycle: []; emergencyStop: [] }>()
         <Play class="size-5" :stroke-width="1.75" aria-hidden="true" />
         <span class="text-xs leading-none">启动</span>
       </Button>
-      <div :title="canEstop ? '急停' : '急停 · 控制服务未就绪'">
+      <div :title="canEstop ? estopLabel : '控制服务未就绪'">
         <Button
+          :key="estopLabel"
           type="button"
           variant="destructive"
           :disabled="!canEstop"
-          aria-label="急停"
-          aria-describedby="emergency-stop-status"
           class="h-11 w-full gap-1.5 rounded-2xl p-0 disabled:opacity-60"
-          @click="emit('emergencyStop')"
+          @click="emit('setEmergencyStop', estop !== true)"
         >
           <OctagonX class="size-5" :stroke-width="1.75" aria-hidden="true" />
-          <span class="text-xs leading-none">急停</span>
+          <span class="text-xs leading-none">{{ estopLabel }}</span>
         </Button>
       </div>
-      <p id="emergency-stop-status" class="sr-only">
-        {{ canEstop ? '发送机床急停' : '控制服务未就绪' }}
-      </p>
     </SidebarFooter>
   </Sidebar>
 </template>

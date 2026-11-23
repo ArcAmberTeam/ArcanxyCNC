@@ -103,6 +103,7 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('control:cycle', (event, file: unknown) => { authorize(event); return controller.startCycle(file) })
   ipcMain.handle('control:estop', event => { authorize(event); return controller.emergencyStop() })
+  ipcMain.handle('control:estop-reset', event => { authorize(event); return controller.resetEmergencyStop() })
   ipcMain.on('control:heartbeat', event => { try { authorize(event); controller.heartbeat() } catch {} })
   ipcMain.on('control:stop', event => { try { authorize(event); void controller.stop() } catch {} })
   window = new BrowserWindow({

@@ -165,6 +165,23 @@ test('emergency stop asserts estop explicitly and never toggles it off', async (
   assert.deepEqual(peer.requests.at(-1)?.params, { action: 'machine.estop', payload: { enabled: true } })
 })
 
+test('reset requires fresh active estop feedback and waits for readback to change state', async () => {
+  const { controller, peer, advance } = await setup()
+  await assert.rejects(controller.resetEmergencyStop())
+  peer.snapshot.estop = true
+  await controller.poll()
+  await controller.resetEmergencyStop()
+  assert.equal(controller.state.estop, true)
+  advance(501)
+  controller.heartbeat()
+  await assert.rejects(controller.resetEmergencyStop())
+  controller.watchdog()
+  assert.equal(controller.state.estop, null)
+  assert.deepEqual(peer.requests.filter(item => item.method === 'command.execute').map(item => item.params), [
+    { action: 'machine.estop', payload: { enabled: false } },
+  ])
+})
+
 test('closing the window releases the connection and never reconnects', async () => {
   const { controller, peer } = await setup()
   await controller.start({ axis: 'Y', direction: 1, feedRate: 100 })

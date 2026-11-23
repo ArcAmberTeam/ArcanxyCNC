@@ -115,6 +115,7 @@ export interface ControlState {
   programFile: string | null
   canStartCycle: boolean
   canEstop: boolean
+  estop: boolean | null
   jogging: boolean
   activeAxes: readonly ActiveAxis[] | null
   axes: Partial<Record<JogAxis, { maxFeed: number; unit: 'mm' | 'deg' }>>
@@ -135,12 +136,13 @@ export interface ControlBridge {
   chooseProgram(): Promise<void>
   startCycle(file: string): Promise<void>
   emergencyStop(): Promise<void>
+  resetEmergencyStop(): Promise<void>
   heartbeat(): void
 }
 
 export function offlineState(reason: string): ControlState {
   return {
-    serviceConnected: false, connected: false, canJog: false, canHomeAll: false, canEstop: false,
+    serviceConnected: false, connected: false, canJog: false, canHomeAll: false, canEstop: false, estop: null,
     programFile: null, canStartCycle: false, jogging: false, axes: {}, activeAxes: null, readings: null, reason, error: '', commandState: 'disconnected',
   }
 }

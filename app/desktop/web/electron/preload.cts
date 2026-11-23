@@ -12,6 +12,7 @@ const bridge: ControlBridge = {
   chooseProgram: () => ipcRenderer.invoke('control:choose-program'),
   startCycle: file => ipcRenderer.invoke('control:cycle', file),
   emergencyStop: () => ipcRenderer.invoke('control:estop'),
+  resetEmergencyStop: () => ipcRenderer.invoke('control:estop-reset'),
   heartbeat: () => ipcRenderer.send('control:heartbeat'),
   onState(callback: (state: ControlState) => void) {
     const listener = (_event: Electron.IpcRendererEvent, state: ControlState) => callback(state)

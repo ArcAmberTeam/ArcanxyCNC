@@ -9,7 +9,7 @@ import { SettingsPanel } from '../features/settings'
 import { useControllerConnection } from '../connection/client'
 import { loadSystemInfo } from '../connection/system-info'
 
-const { state, error, start, stop, chooseProgram, startCycle, emergencyStop, setMachineControl, setSpindle, homeAll, submittingHome, axisProfiles } = useControllerConnection()
+const { state, error, start, stop, chooseProgram, startCycle, setEmergencyStop, setMachineControl, setSpindle, homeAll, submittingHome, axisProfiles } = useControllerConnection()
 const startMessage = ref('')
 const showMessage = ref(false)
 const sendingStart = ref(false)
@@ -52,7 +52,8 @@ async function launchCycle() {
 </script>
 
 <template>
-  <WorkspacePage v-slot="{ activeSection }" :terminal-enabled="terminalEnabled" :start-disabled="sendingStart || (!!state.programFile && !state.canStartCycle)" :can-estop="state.canEstop" @start-cycle="launchCycle" @emergency-stop="emergencyStop" @section-change="stop">
+  <WorkspacePage v-slot="{ activeSection }" :terminal-enabled="terminalEnabled" :start-disabled="sendingStart || (!!state.programFile && !state.canStartCycle)"
+    :can-estop="state.canEstop" :estop="state.estop" @start-cycle="launchCycle" @set-emergency-stop="setEmergencyStop" @section-change="stop">
     <PreviewPanel v-if="activeSection === 'preview'" :file="state.programFile" />
     <ManualControlPanel v-else-if="activeSection === 'control'" :state="state" :error="error" :profiles="axisProfiles" :submitting-home="submittingHome"
       @home="homeAll" @start="start" @stop="stop" @spindle="setSpindle" @flood="setMachineControl('flood', $event)" @feed="setMachineControl('feed', $event)" />

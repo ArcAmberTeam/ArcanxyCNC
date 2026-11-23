@@ -11,10 +11,11 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
   const sockets = new Set<net.Socket>()
   let jogging = false
   let powered = false
+  let estop = false
   const snapshot = () => ({
-    connected: true, axes: ['X', 'Y', 'Z'], motionMode: 'world', powered, estop: false,
+    connected: true, axes: ['X', 'Y', 'Z'], motionMode: 'world', powered, estop,
     linearUnits: 1, angularUnits: 1, commandState: 'idle',
-    capabilities: { 'jog.start': powered && !jogging, 'machine.power-and-home': !jogging, 'machine.estop': true },
+    capabilities: { 'jog.start': powered && !jogging, 'machine.power-and-home': !estop && !jogging, 'machine.estop': true },
     axisLimits: Object.fromEntries(['X', 'Y', 'Z'].map(name => [name, { maxVelocity: 10 }])),
   })
   const server = net.createServer(socket => {
@@ -33,6 +34,10 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
           if (request.params.action === 'machine.power-and-home') powered = true
           if (request.params.action === 'jog.start') jogging = true
           if (['jog.stop', 'machine.estop'].includes(request.params.action)) jogging = false
+          if (request.params.action === 'machine.estop') {
+            estop = request.params.payload.enabled
+            if (estop) powered = false
+          }
           result = { accepted: true, snapshot: snapshot() }
         }
         const body = Buffer.from(JSON.stringify({ version: 2, request_id: request.request_id, result }))
@@ -84,9 +89,19 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
     await expect.poll(() => jogging).toBe(false)
     await page.keyboard.up('Space')
     await page.bringToFront()
-    await page.getByRole('button', { name: '急停', exact: true }).click()
-    await expect.poll(() => commands.some(item => item.action === 'machine.estop')).toBe(true)
-    expect(commands.find(item => item.action === 'machine.estop')?.payload).toEqual({ enabled: true })
+    const stop = page.getByRole('button', { name: '急停', exact: true })
+    const reset = page.getByRole('button', { name: '解除急停', exact: true })
+    const beforeEstop = commands.length
+    await stop.click()
+    await expect(reset).toBeEnabled()
+    await expect(home).toBeDisabled()
+    await reset.click()
+    await expect(stop).toBeEnabled()
+    expect(commands.slice(beforeEstop)).toEqual([
+      { action: 'machine.estop', payload: { enabled: true } },
+      { action: 'machine.estop', payload: { enabled: false } },
+    ])
+    expect(powered).toBe(false)
     expect(commands.some(item => ['machine.power', 'machine.home-all', 'motion.mode'].includes(item.action))).toBe(false)
   } finally {
     await desktop?.close()

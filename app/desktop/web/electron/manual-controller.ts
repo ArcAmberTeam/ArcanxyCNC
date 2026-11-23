@@ -76,6 +76,7 @@ export class ManualController {
       programFile: data.connected && typeof data.file === 'string' ? data.file : null,
       canStartCycle: data.connected && capabilities['program.home-and-run'] === true,
       canEstop: data.connected && capabilities['machine.estop'] === true,
+      estop: data.connected && typeof data.estop === 'boolean' ? data.estop : null,
       jogging: this.held, activeAxes, axes, reason,
       error: commandError || this.state.error,
       commandState: typeof data.commandState === 'string' ? data.commandState : 'unknown',
@@ -118,8 +119,8 @@ export class ManualController {
     if ((this.held || this.starting) && (!this.fresh() || this.now() - this.sampledAt >= 500)) {
       void this.stop()
     }
-    if (this.now() - this.sampledAt >= 500 && (this.state.canJog || this.state.canHomeAll || this.state.readings || this.state.programFile !== null)) {
-      this.state = { ...this.state, readings: null, activeAxes: null, axes: {}, programFile: null, canStartCycle: false, canJog: false, canHomeAll: false, canEstop: false, reason: '机床状态已过期，等待更新' }
+    if (this.now() - this.sampledAt >= 500 && (this.state.canEstop || this.state.estop !== null || this.state.canJog || this.state.canHomeAll || this.state.readings || this.state.programFile !== null)) {
+      this.state = { ...this.state, readings: null, activeAxes: null, axes: {}, programFile: null, canStartCycle: false, canJog: false, canHomeAll: false, canEstop: false, estop: null, reason: '机床状态已过期，等待更新' }
       this.emit()
     }
   }
@@ -192,6 +193,11 @@ export class ManualController {
     } catch (error) { this.disconnect(error); throw error }
   }
 
+  async resetEmergencyStop() {
+    await this.sendControl('machine.estop', { enabled: false },
+      () => this.state.canEstop && this.state.estop === true)
+  }
+
   get programDirectory() {
     return typeof this.snapshot.programPrefix === 'string' ? this.snapshot.programPrefix : undefined
   }
@@ -247,7 +253,7 @@ export class ManualController {
     })
   }
 
-  private async sendControl(action: 'machine.power-and-home' | 'program.home-and-run' | 'coolant.flood' | 'override.feed' | 'spindle.forward' | 'spindle.reverse' | 'spindle.stop', payload: Record<string, unknown>, allowed: () => boolean) {
+  private async sendControl(action: 'machine.estop' | 'machine.power-and-home' | 'program.home-and-run' | 'coolant.flood' | 'override.feed' | 'spindle.forward' | 'spindle.reverse' | 'spindle.stop', payload: Record<string, unknown>, allowed: () => boolean) {
     const generation = this.generation
     const current = () => this.transport.connected && this.fresh() && this.now() - this.sampledAt < 500
       && (action === 'spindle.stop' || (generation === this.generation && !this.held)) && allowed()

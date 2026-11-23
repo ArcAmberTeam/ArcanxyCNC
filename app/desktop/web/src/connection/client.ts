@@ -36,11 +36,16 @@ export function useControllerConnection() {
     bridge.heartbeat()
     await bridge.startCycle(state.value.programFile)
   }
-  async function emergencyStop() {
+  async function setEmergencyStop(enabled: boolean) {
     if (!bridge) return
     error.value = ''
-    try { await bridge.emergencyStop() }
-    catch (problem) { error.value = problem instanceof Error ? problem.message : String(problem) }
+    try {
+      if (enabled) await bridge.emergencyStop()
+      else {
+        bridge.heartbeat()
+        await bridge.resetEmergencyStop()
+      }
+    } catch (problem) { error.value = problem instanceof Error ? problem.message : String(problem) }
   }
   async function homeAll(confirmed: true) {
     if (!bridge || !state.value.canHomeAll || submittingHome.value) return
@@ -86,6 +91,6 @@ export function useControllerConnection() {
     window.removeEventListener('pagehide', stop)
     document.removeEventListener('visibilitychange', hidden)
   })
-  return { state: readonly(state), error: readonly(error), start, stop, chooseProgram, startCycle, emergencyStop,
+  return { state: readonly(state), error: readonly(error), start, stop, chooseProgram, startCycle, setEmergencyStop,
     setMachineControl, setSpindle, homeAll, submittingHome: readonly(submittingHome), axisProfiles: window.cncAxisProfiles }
 }

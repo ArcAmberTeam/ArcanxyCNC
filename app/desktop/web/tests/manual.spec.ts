@@ -6,7 +6,7 @@ async function connect(page: Page, axes = ['X', 'Y', 'Z', 'B', 'C'], overview = 
     const calls: unknown[] = []
     const listeners = new Set<(state: unknown) => void>()
     let state = {
-      serviceConnected: true, connected: true, canJog: true, canEstop: true, jogging: false,
+      serviceConnected: true, connected: true, canJog: true, canEstop: true, estop: false, jogging: false,
       axes: Object.fromEntries(enabledAxes.map(axis => [axis, { maxFeed: 600, unit: 'ABC'.includes(axis) ? 'deg' : 'mm' }])),
       activeAxes: enabledAxes.map(name => ({ name, unit: 'ABC'.includes(name) ? 'deg' : 'mm',
         min: name === 'X' ? 0 : -10, max: name === 'X' ? null : 10, maxFeed: 600 })),
