@@ -185,9 +185,9 @@ class BcXyzJogTests(unittest.TestCase):
         self.assertEqual(self.contents(), after)
 
     def installed_jog(self):
-        installation.write_fixture(
-            self.machine, installation.FIXTURE.with_name("bc-xyz-jog-installed.json")
-        )
+        fixture = installation.FIXTURE.with_name("bc-xyz-jog-installed.json")
+        for name, lines in json.loads(fixture.read_text()).items():
+            (self.machine / name).write_text("".join(lines))
         (self.config / "launcher.json").write_text(
             json.dumps({"ini": "/etc/betterlinuxcnc/machine/axis-3.ini"})
         )
