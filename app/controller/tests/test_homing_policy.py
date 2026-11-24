@@ -84,14 +84,14 @@ def bc_profile():
     vendor = parallel_profile()
     vendor.ini_values.update(
         {
-            ("BETTERCNC_HOMING", "CONFIGURATION_REVISION"): "bc-xyz-homing-20261124",
+            ("BETTERCNC_HOMING", "CONFIGURATION_REVISION"): "bc-xyz-parallel-homing-20261124",
             ("BETTERCNC_HOMING", "TRAVEL_SOURCE"): "OPERATOR_CONFIRMED_ENVELOPE",
         }
     )
-    for joint, axis, travel, maximum, sequence in (
-        (0, "X", 600, 580, 2),
-        (1, "Y", 400, 380, 3),
-        (2, "Z", 90, 50, 1),
+    for joint, axis, travel, maximum in (
+        (0, "X", 600, 580),
+        (1, "Y", 400, 380),
+        (2, "Z", 90, 50),
     ):
         vendor.ini_values[("BETTERCNC_HOMING", f"TRAVEL_{axis}_MM")] = str(travel)
         for key, value in {
@@ -100,7 +100,7 @@ def bc_profile():
             "HOME_LATCH_VEL": "-0.5",
             "HOME_BACKOFF_VEL": "1",
             "HOME_FINAL_VEL": "2",
-            "HOME_SEQUENCE": str(sequence),
+            "HOME_SEQUENCE": "1",
             "MAX_ACCELERATION": "50",
         }.items():
             vendor.ini_values[(f"JOINT_{joint}", key)] = value
@@ -223,7 +223,7 @@ class HomingPolicyTests(unittest.TestCase):
                 self.assertFalse(controller.dispatch("machine.home-all"))
                 self.assertEqual(vendor.calls, [])
 
-    def test_sequential_bc_homing_has_a_bounded_longer_completion_window(self):
+    def test_parallel_bc_homing_has_a_bounded_longer_completion_window(self):
         for action in ("machine.home-all", "machine.power-and-home"):
             with self.subTest(action=action):
                 vendor = bc_profile()
@@ -376,20 +376,25 @@ class HomingPolicyTests(unittest.TestCase):
         self.assertEqual(vendor.calls, [("home", (-1,))])
 
     def test_parallel_home_waits_for_all_axes_then_allows_coordinated_motion(self):
-        vendor = parallel_profile()
-        controller = Controller(module=vendor)
-        self.assertTrue(controller.poll()["capabilities"]["machine.home-all"])
-        self.assertFalse(controller.dispatch("program.run"))
-        self.assertTrue(controller.dispatch("machine.home-all"))
-        self.assertEqual(vendor.calls, [("home", (-1,))])
-        vendor.confirm(apply=False)
-        vendor.status.homed = [1, 1, 0]
-        self.assertEqual(controller.poll()["commandState"], "sent")
-        vendor.status.homed[2] = 1
-        snapshot = controller.poll()
-        self.assertEqual(snapshot["commandState"], "completed")
-        for name in ("mode.world", "mdi.execute", "program.run"):
-            self.assertTrue(snapshot["capabilities"][name], name)
+        for profile in (parallel_profile, bc_profile):
+            with self.subTest(profile=profile.__name__):
+                vendor = profile()
+                controller = Controller(module=vendor)
+                self.assertTrue(controller.poll()["capabilities"]["machine.home-all"])
+                self.assertFalse(controller.dispatch("program.run"))
+                self.assertTrue(controller.dispatch("machine.home-all"))
+                self.assertEqual(vendor.calls, [("home", (-1,))])
+                vendor.confirm(apply=False)
+                vendor.status.homed = [1, 1, 0]
+                self.assertEqual(controller.poll()["commandState"], "sent")
+                vendor.status.homed[2] = 1
+                vendor.status.joint[2]["homing"] = True
+                self.assertEqual(controller.poll()["commandState"], "sent")
+                vendor.status.joint[2]["homing"] = False
+                snapshot = controller.poll()
+                self.assertEqual(snapshot["commandState"], "completed")
+                for name in ("mode.world", "mdi.execute", "program.run"):
+                    self.assertTrue(snapshot["capabilities"][name], name)
 
     def test_parallel_home_rejects_unreviewed_speed_clearance_and_braking_budget(self):
         for setting, value in (

@@ -6,6 +6,7 @@ import re
 
 AXES = "XYZABCUVW"
 SYSTEMS = ("G54", "G55", "G56", "G57", "G58", "G59", "G59.1", "G59.2", "G59.3")
+BC_HOMING_REVISION = "bc-xyz-parallel-homing-20261124"
 
 
 class Configuration:
@@ -83,11 +84,11 @@ class Configuration:
             or self.get("BETTERCNC_HOMING", "PROFILE") == "zhulong-v2"
         )
         self.homing_message = self._homing_policy() if self.dedicated_homing else ""
-        # Sequential BC searches can exceed 300 s across the full 600/400/90 mm
-        # envelope at 2 mm/s, before the double-touch retreats and settling time.
+        # A BC search across the full 600 mm X envelope takes 300 s at 2 mm/s,
+        # before the double-touch retreats and settling time.
         self.homing_timeout = (
             900
-            if self.get("BETTERCNC_HOMING", "CONFIGURATION_REVISION") == "bc-xyz-homing-20261124"
+            if self.get("BETTERCNC_HOMING", "CONFIGURATION_REVISION") == BC_HOMING_REVISION
             else 300
         )
 
@@ -115,7 +116,7 @@ class Configuration:
             return "回零未配置：XYZ joint 映射或 HOME ALL 集合不匹配"
         revision = self.get(section, "CONFIGURATION_REVISION")
         parallel = revision == "zhulong-xyz-v5-20261026"
-        bc = revision == "bc-xyz-homing-20261124"
+        bc = revision == BC_HOMING_REVISION
         commissioned = parallel or bc or revision == "zhulong-xyz-20261026"
         if bc and self.get(section, "TRAVEL_SOURCE") != "OPERATOR_CONFIRMED_ENVELOPE":
             return "回零未配置：BC 三轴可用行程尚未确认"
@@ -136,7 +137,7 @@ class Configuration:
             expected_scale = -320 if joint == 2 else 320
             if bc and self.number(joint_section, "STEP_SCALE") != expected_scale:
                 return f"回零未配置：{axis} 轴脉冲当量或方向已改变，需要重新核验"
-            sequence = (2, 3, 1)[joint] if bc else 1 if parallel else joint + 1
+            sequence = 1 if parallel or bc else joint + 1
             search = self.number(joint_section, "HOME_SEARCH_VEL")
             latch = self.number(joint_section, "HOME_LATCH_VEL")
             final = self.number(joint_section, "HOME_FINAL_VEL")

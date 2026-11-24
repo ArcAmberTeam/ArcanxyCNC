@@ -271,13 +271,13 @@ class BcXyzJogTests(unittest.TestCase):
         ini = configparser.ConfigParser(interpolation=None)
         ini.read_string(after["axis-3.ini"].decode())
         self.assertEqual(ini["BETTERCNC_HOMING"]["MOTOR_DIRECTIONS_VERIFIED"], "YES")
-        for joint, axis, sequence, maximum in (
-            (0, "X", 2, 580),
-            (1, "Y", 3, 380),
-            (2, "Z", 1, 50),
+        for joint, axis, maximum in (
+            (0, "X", 580),
+            (1, "Y", 380),
+            (2, "Z", 50),
         ):
             section = ini[f"JOINT_{joint}"]
-            self.assertEqual(section.getint("HOME_SEQUENCE"), sequence)
+            self.assertEqual(section.getint("HOME_SEQUENCE"), 1)
             self.assertEqual(section.getfloat("HOME"), 0)
             self.assertEqual(section.getfloat("HOME_OFFSET"), -5)
             self.assertEqual(section.getfloat("HOME_SEARCH_VEL"), -2)

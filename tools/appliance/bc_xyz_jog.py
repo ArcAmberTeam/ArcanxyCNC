@@ -19,7 +19,7 @@ PREVIOUS_JOG = {
     HAL: "9d35e7ba7b7731e76b02eb07fec797a04d54bfc94e17b44d2dd75f21f3d66b99",
 }
 CORRECTED_XY_HAL = "48283146c5c3cdb3bd7c92412ead8401fe452a52ef04aa3de5c027161becaad5"
-HOMING_REVISION = "bc-xyz-homing-20261124"
+HOMING_REVISION = "bc-xyz-parallel-homing-20261124"
 
 
 # --------#
@@ -140,10 +140,10 @@ def commission_homing(files):
             "TRAVEL_Z_MM": "90",
         }
     )
-    for joint, axis, maximum, sequence in (
-        (0, "X", 580, 2),
-        (1, "Y", 380, 3),
-        (2, "Z", 50, 1),
+    for joint, axis, maximum in (
+        (0, "X", 580),
+        (1, "Y", 380),
+        (2, "Z", 50),
     ):
         for section in (f"AXIS_{axis}", f"JOINT_{joint}"):
             # HOME lies inside the limit despite floating-point readback noise.
@@ -156,7 +156,7 @@ def commission_homing(files):
                 "HOME_LATCH_VEL": "-0.5",
                 "HOME_BACKOFF_VEL": "1",
                 "HOME_FINAL_VEL": "2",
-                "HOME_SEQUENCE": str(sequence),
+                "HOME_SEQUENCE": "1",
                 "HOME_IGNORE_LIMITS": "YES",
             }
         )
