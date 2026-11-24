@@ -52,11 +52,12 @@ export function useControllerConnection() {
     catch (problem) { error.value = problem instanceof Error ? problem.message : String(problem) }
     finally { submittingHome.value = false }
   }
-  async function setMachineControl(setting: 'flood' | 'feed', value: boolean | number) {
+  async function setMachineControl(setting: 'flood' | 'feed' | 'power', value: boolean | number) {
     if (!bridge) return
     error.value = ''
     try {
       bridge.heartbeat()
+      if (setting === 'power' && typeof value === 'boolean') await bridge.setPower(value)
       if (setting === 'flood' && typeof value === 'boolean') await bridge.setFlood(value)
       if (setting === 'feed' && typeof value === 'number') await bridge.setFeedOverride(value)
     } catch (problem) { error.value = problem instanceof Error ? problem.message : String(problem) }

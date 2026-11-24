@@ -6,7 +6,7 @@ async function connect(page: Page, axes = ['X', 'Y', 'Z', 'B', 'C'], overview = 
     const calls: unknown[] = []
     const listeners = new Set<(state: unknown) => void>()
     let state = {
-      serviceConnected: true, connected: true, canJog: true, canEstop: true, estop: false, jogging: false,
+      serviceConnected: true, connected: true, canJog: true, jogMode: 'world', canSetPower: true, powered: true, canEstop: true, estop: false, jogging: false,
       axes: Object.fromEntries(enabledAxes.map(axis => [axis, { maxFeed: 600, unit: 'ABC'.includes(axis) ? 'deg' : 'mm' }])),
       activeAxes: enabledAxes.map(name => ({ name, unit: 'ABC'.includes(name) ? 'deg' : 'mm',
         min: name === 'X' ? 0 : -10, max: name === 'X' ? null : 10, maxFeed: 600 })),
@@ -30,6 +30,11 @@ async function connect(page: Page, axes = ['X', 'Y', 'Z', 'B', 'C'], overview = 
         setSpindle: async (direction: number, rpm?: number) => { calls.push({ direction, rpm }) },
         setFlood: async (enabled: boolean) => { calls.push({ enabled }) },
         setFeedOverride: async (ratio: number) => { calls.push({ ratio }) },
+        setPower: async (enabled: boolean) => {
+          calls.push({ power: enabled })
+          state = { ...state, powered: enabled, canJog: enabled }
+          listeners.forEach(listener => listener(state))
+        },
         heartbeat: () => {},
         emergencyStop: async () => { calls.push('estop') },
       },
@@ -39,6 +44,16 @@ async function connect(page: Page, axes = ['X', 'Y', 'Z', 'B', 'C'], overview = 
   await page.getByRole('button', { name: '控制', exact: true }).click()
   if (!overview) await page.getByRole('button', { name: /^移动控制/ }).click()
 }
+
+test('manual power control uses explicit enable and disable without homing', async ({ page }) => {
+  await connect(page, ['X', 'Y', 'Z'])
+  await page.getByRole('button', { name: '关闭使能', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'X 轴正向' })).toBeDisabled()
+  await page.getByRole('button', { name: '使能', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'X 轴正向' })).toBeEnabled()
+  const calls = await page.evaluate(() => (window as unknown as { controlTestCalls: unknown[] }).controlTestCalls)
+  expect(calls.filter(value => typeof value === 'object' && value !== null)).toEqual([{ power: false }, { power: true }])
+})
 
 test('manual overview fits its cards to the frame and gives spare height to coordinates', async ({ page }) => {
   await page.setViewportSize({ width: 1152, height: 864 })

@@ -55,6 +55,10 @@ def main():
         "migrate-machine",
         help="Apply the fixed commissioned XYZ correction while stopped",
     )
+    commands.add_parser(
+        "prepare-bc-xyz-jog",
+        help="Prepare the captured BC installation for bounded XYZ direction checks",
+    )
     stage = commands.add_parser(
         "stage", help="Preview a machine import in a new staging directory"
     )
@@ -184,6 +188,8 @@ def main():
         print("Machine axis migration: " + _axis_upgrade.upgrade())
         if (axis_profiles.CONFIG / "launcher.json").is_file():
             axis_profiles.AxisProfileStore().seed()
+    elif args.action == "prepare-bc-xyz-jog":
+        print("BC XYZ jogging preset: " + _axis_upgrade.upgrade(xyz_jog=True))
     elif args.action == "backup":
         print(json.dumps(_backup.backup()))
     elif args.action == "prepare":

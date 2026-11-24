@@ -15,6 +15,22 @@ const record = (value: unknown): Record<string, unknown> => {
   return value as Record<string, unknown>
 }
 
+// Only explicit, one-to-one trivkins mappings can label a joint with an axis name.
+function mappedJoint(snapshot: Record<string, unknown>, axis: JogAxis): number | undefined {
+  const map = snapshot.jointMap
+  if (snapshot.kinematicsModel !== 'trivkins' || !Number.isInteger(snapshot.jointCount)
+    || Number(snapshot.jointCount) < 1 || Number(snapshot.jointCount) > 9
+    || !map || typeof map !== 'object' || Array.isArray(map)) return
+  const entries = map as Record<string, unknown>
+  const selected = entries[axis]
+  if (!Array.isArray(selected) || selected.length !== 1 || !Number.isInteger(selected[0])
+    || selected[0] < 0 || selected[0] >= Number(snapshot.jointCount)) return
+  const joint = selected[0] as number
+  if (Object.values(entries).some(value => !Array.isArray(value))
+    || Object.values(entries).flat().filter(value => value === joint).length !== 1) return
+  return joint
+}
+
 //--------//
 // BEGIN: ManualController
 // Owns desktop jogging leases; the service remains the authority for machine interlocks.
@@ -34,6 +50,7 @@ export class ManualController {
   private localCommandError = ''
   private nextConnect = 0
   private closed = false
+  private jogTarget?: { axis: JogAxis; mode: 'joint' | 'world'; joint?: number; units: number }
 
   constructor(
     private transport: ControlTransport,
@@ -62,22 +79,28 @@ export class ManualController {
     const activeAxes = data.connected ? activeAxisSettings(data.axes, data) : null
     for (const axis of activeAxes ?? []) {
       const name = jogAxes.find(name => name === axis.name)
-      if (name && axis.maxFeed !== null) axes[name] = { maxFeed: axis.maxFeed, unit: axis.unit }
+      if (name && axis.maxFeed !== null && (data.motionMode !== 'joint' || mappedJoint(data, name) !== undefined)) {
+        axes[name] = { maxFeed: axis.maxFeed, unit: axis.unit }
+      }
     }
     let reason = ''
     if (!data.connected) reason = '控制服务已连接，LinuxCNC 尚未就绪'
     else if (data.estop !== false) reason = '机床处于急停状态'
     else if (data.powered !== true) reason = '机床尚未启动'
-    else if (data.motionMode !== 'world') reason = '请先完成回零并切换到轴坐标模式'
+    else if (data.motionMode !== 'world' && data.motionMode !== 'joint') reason = '机床运动模式未知'
     else if (!positive(data.linearUnits) || !positive(data.angularUnits)) reason = '机床单位信息不可用'
     else if (capabilities['jog.start'] !== true && !this.held) reason = '当前机床状态不允许点动'
-    else if (!Object.keys(axes).length) reason = '机床未提供可用轴和速度限制'
+    else if (!Object.keys(axes).length) reason = data.motionMode === 'joint'
+      ? '机床未提供唯一的轴与关节映射及速度限制' : '机床未提供可用轴和速度限制'
     const commandError = data.commandState === 'error' || data.commandState === 'unknown'
       ? String(data.commandMessage || '控制命令结果异常，请检查机床状态') : ''
     this.state = {
       serviceConnected: true, connected: data.connected,
       readings: machineReadings(data, capabilities),
       canJog: !reason && capabilities['jog.start'] === true && !this.held && !this.starting && !this.stopping,
+      jogMode: data.connected && (data.motionMode === 'joint' || data.motionMode === 'world') ? data.motionMode : null,
+      canSetPower: data.connected && capabilities['machine.power'] === true && !this.held && !this.starting && !this.stopping,
+      powered: data.connected && typeof data.powered === 'boolean' ? data.powered : null,
       canHomeAll: data.connected && capabilities['machine.power-and-home'] === true && !this.held,
       programFile: data.connected && typeof data.file === 'string' ? data.file : null,
       canStartCycle: data.connected && capabilities['program.home-and-run'] === true,
@@ -88,12 +111,20 @@ export class ManualController {
       commandState: typeof data.commandState === 'string' ? data.commandState : 'unknown',
     }
     this.emit()
-    if (this.held && (reason || commandError)) void this.stop()
+    if (this.held && (reason || commandError || !this.sameJogTarget())) void this.stop()
+  }
+
+  private sameJogTarget() {
+    const target = this.jogTarget
+    return !!target && this.snapshot.motionMode === target.mode
+      && (target.mode !== 'joint' || mappedJoint(this.snapshot, target.axis) === target.joint)
+      && ('ABC'.includes(target.axis) ? this.snapshot.angularUnits : this.snapshot.linearUnits) === target.units
   }
 
   private disconnect(error: unknown) {
     this.generation++
     this.held = false
+    this.jogTarget = undefined
     this.sampledAt = -Infinity
     this.transport.close()
     this.nextConnect = this.now() + 1000
@@ -130,7 +161,7 @@ export class ManualController {
       void this.stop()
     }
     if (this.now() - this.sampledAt >= 500 && (this.state.canEstop || this.state.estop !== null || this.state.canJog || this.state.canHomeAll || this.state.readings || this.state.programFile !== null)) {
-      this.state = { ...this.state, readings: null, activeAxes: null, axes: {}, programFile: null, canStartCycle: false, canJog: false, canHomeAll: false, canEstop: false, estop: null, reason: '机床状态已过期，等待更新' }
+      this.state = { ...this.state, readings: null, activeAxes: null, axes: {}, programFile: null, canStartCycle: false, canJog: false, jogMode: null, canSetPower: false, powered: null, canHomeAll: false, canEstop: false, estop: null, reason: '机床状态已过期，等待更新' }
       this.emit()
     }
   }
@@ -148,16 +179,25 @@ export class ManualController {
     }
     const units = 'ABC'.includes(axis) ? this.snapshot.angularUnits : this.snapshot.linearUnits
     if (!positive(units)) throw new Error('机床单位信息不可用')
+    const mode = this.snapshot.motionMode
+    if (mode !== 'joint' && mode !== 'world') throw new Error('机床运动模式未知')
+    const joint = mode === 'joint' ? mappedJoint(this.snapshot, axis) : undefined
+    if (mode === 'joint' && joint === undefined) throw new Error('当前轴没有唯一的关节映射')
     const generation = ++this.generation
+    this.jogTarget = { axis, mode, joint, units }
     this.held = true
     this.starting = true
     this.localCommandError = ''
-    this.state = { ...this.state, canJog: false, canHomeAll: false, jogging: true, error: '' }
+    this.state = { ...this.state, canJog: false, canSetPower: false, canHomeAll: false, jogging: true, error: '' }
     this.emit()
     try {
       const result = await this.transport.request('command.execute', {
-        action: 'jog.start', payload: { axis, direction, mode: 'world', velocity: feedRate * units / 60, increment: 0 },
-      }, () => generation === this.generation && this.held && this.fresh() && this.now() - this.sampledAt < 500)
+        action: 'jog.start', payload: {
+          axis, direction, mode, ...(mode === 'joint' ? { joint } : {}),
+          velocity: feedRate * units / 60, increment: mode === 'joint' ? 0.1 * units : 0,
+        },
+      }, () => generation === this.generation && this.held && this.sameJogTarget() && this.fresh()
+        && this.now() - this.sampledAt < 500 && feedRate <= (this.state.axes[axis]?.maxFeed ?? 0))
       this.accept(result)
       if (generation !== this.generation || !this.fresh()) await this.stop()
     } catch (error) {
@@ -185,6 +225,7 @@ export class ManualController {
     this.generation++
     const needsStop = this.held || this.starting
     this.held = false
+    this.jogTarget = undefined
     this.state = { ...this.state, jogging: false, canJog: false }
     this.emit()
     if (this.stopping) return this.stopping
@@ -276,6 +317,13 @@ export class ManualController {
     await this.sendControl('coolant.flood', { enabled }, () => this.state.readings?.canSetFlood === true)
   }
 
+  async setPower(enabled: unknown) {
+    if (typeof enabled !== 'boolean') throw new Error('使能参数无效')
+    await this.sendControl('machine.power', { enabled }, () => this.state.canSetPower
+      && this.state.powered !== null && this.state.powered !== enabled
+      && (!enabled || this.state.estop === false))
+  }
+
   async setFeedOverride(value: unknown) {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error('进给倍率无效')
     await this.sendControl('override.feed', { value }, () => {
@@ -284,7 +332,7 @@ export class ManualController {
     })
   }
 
-  private async sendControl(action: 'machine.estop' | 'machine.power-and-home' | 'program.home-and-run' | 'coolant.flood' | 'override.feed' | 'spindle.forward' | 'spindle.reverse' | 'spindle.stop', payload: Record<string, unknown>, allowed: () => boolean) {
+  private async sendControl(action: 'machine.estop' | 'machine.power' | 'machine.power-and-home' | 'program.home-and-run' | 'coolant.flood' | 'override.feed' | 'spindle.forward' | 'spindle.reverse' | 'spindle.stop', payload: Record<string, unknown>, allowed: () => boolean) {
     const generation = this.generation
     const current = () => this.transport.connected && this.fresh() && this.now() - this.sampledAt < 500
       && (action === 'spindle.stop' || (generation === this.generation && !this.held)) && allowed()
@@ -302,6 +350,7 @@ export class ManualController {
     this.checkResetFeedback?.()
     this.generation++
     this.held = false
+    this.jogTarget = undefined
     this.heartbeatAt = -Infinity
     this.transport.close()
   }

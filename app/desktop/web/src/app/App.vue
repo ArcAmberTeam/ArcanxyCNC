@@ -82,7 +82,7 @@ async function confirmEmergencyStopReset() {
     :can-estop="state.canEstop" :estop="state.estop" :reset-pending="resetPending" @start-cycle="launchCycle" @set-emergency-stop="requestEmergencyStop" @section-change="stop">
     <PreviewPanel v-if="activeSection === 'preview'" :file="state.programFile" />
     <ManualControlPanel v-else-if="activeSection === 'control'" :state="state" :error="error" :profiles="axisProfiles" :submitting-home="submittingHome"
-      @home="homeAll" @start="start" @stop="stop" @spindle="setSpindle" @flood="setMachineControl('flood', $event)" @feed="setMachineControl('feed', $event)" />
+      @home="homeAll" @start="start" @stop="stop" @power="setMachineControl('power', $event)" @spindle="setSpindle" @flood="setMachineControl('flood', $event)" @feed="setMachineControl('feed', $event)" />
     <SettingsPanel v-else-if="activeSection === 'settings'" :version="applicationVersion" :load-info="loadSystemInfo" :admin-sudo="adminSudo" :terminal-enabled="terminalEnabled" @update:terminal-enabled="setTerminalEnabled" />
     <TerminalPanel v-else-if="activeSection === 'terminal' && terminalEnabled" :bridge="terminal" />
   </WorkspacePage>

@@ -17,7 +17,16 @@ import subprocess
 import uuid
 
 import _homing
-from axis_profiles import ENV, HELPER, PROFILE_NAMES, migration_base, stock_presets
+import bc_xyz_jog
+from axis_profiles import (
+    ENV,
+    HELPER,
+    LEASE,
+    PROFILE_NAMES,
+    UPDATE_LOCK,
+    migration_base,
+    stock_presets,
+)
 
 V4_REVISION = "zhulong-xyz-20261026"
 REVISION = "zhulong-xyz-v5-20261026"
@@ -296,6 +305,12 @@ def _upgrade(root, config):
     updated = _fast_profile(_correct(files) if hashes == ORIGINAL else files)
     if counts:
         updated.update(stock_presets(updated, INI, counts))
+    _publish(root, config, installed, updated)
+    return "migrated"
+
+
+def _publish(root, config, installed, updated, launcher=None):
+    """Publish a complete staged directory; Rust owns every preset INI write."""
     stage = ".axis-upgrade-" + uuid.uuid4().hex
     os.mkdir(stage, 0o700, dir_fd=config)
     try:
@@ -331,6 +346,8 @@ def _upgrade(root, config):
                 name: _read(machine, name) for name in os.listdir(machine)
             } != installed:
                 raise ValueError("Machine configuration changed during migration")
+        if launcher is not None and _read(config, "launcher.json") != launcher:
+            raise ValueError("Launcher changed during preparation")
         _exchange(config, stage, "machine")
         os.fsync(config)
     finally:
@@ -339,10 +356,69 @@ def _upgrade(root, config):
             for name in os.listdir(staged):
                 os.unlink(name, dir_fd=staged)
         os.rmdir(stage, dir_fd=config)
-    return "migrated"
 
 
-def upgrade():
+# --------#
+# BEGIN: BcXyzJogPreparation
+@contextlib.contextmanager
+def _lease(root, path):
+    with contextlib.ExitStack() as stack:
+        parent = root
+        for part in path.parts[1:-1]:
+            parent = stack.enter_context(_directory(parent, part))
+        descriptor = os.open(
+            path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+        )
+        try:
+            info = os.fstat(descriptor)
+            if (
+                info.st_uid != 0
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or info.st_mode & 0o6022
+            ):
+                raise ValueError("Untrusted configuration maintenance lease")
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            yield
+        finally:
+            os.close(descriptor)
+
+
+def _prepare_xyz_jog(root, config):
+    # Share both existing maintenance leases; the launcher holds LEASE while live.
+    with _lease(root, UPDATE_LOCK), _lease(root, LEASE):
+        with _directory(config, "machine") as machine:
+            installed = {name: _read(machine, name) for name in os.listdir(machine)}
+        updated = bc_xyz_jog.prepare(installed)
+        state = bc_xyz_jog.validate_destination(installed, updated)
+        launcher = _read(config, "launcher.json")
+        selected = json.loads(launcher).get("ini")
+        if selected not in (
+            "/etc/betterlinuxcnc/machine/axis-5.ini",
+            "/etc/betterlinuxcnc/machine/axis-3.ini",
+        ) or (state != "already-current" and not selected.endswith("axis-5.ini")):
+            raise ValueError("Launcher does not select the captured BC installation")
+        if state == "already-current":
+            return state
+        _stopped(root)
+        _homing.validate_installed()
+        subprocess.run(
+            ["/usr/sbin/betterlinuxcnc-appliance", "backup"],
+            env=ENV,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            check=True,
+            timeout=300,
+        )
+        _publish(root, config, installed, updated, launcher)
+        return "prepared"
+
+
+# END: BcXyzJogPreparation
+# --------#
+
+
+def upgrade(*, xyz_jog=False):
     """Fixed root-only migration, also reached by the unchanged package postinst."""
     with _directory(None, "/") as root, contextlib.ExitStack() as stack:
         try:
@@ -362,6 +438,6 @@ def upgrade():
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError("Invalid axis migration lock")
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return _upgrade(root, config)
+            return _prepare_xyz_jog(root, config) if xyz_jog else _upgrade(root, config)
         finally:
             os.close(lock)

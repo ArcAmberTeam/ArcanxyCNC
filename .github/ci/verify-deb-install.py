@@ -439,6 +439,25 @@ def verify_pa_configuration():
         request({"operation": "save", "target": "launcher.json", "revision": current_launcher["revision"],
                  "content": json.dumps({"ini": str(ini), "startup_timeout": 60})})
         require(json.loads(launcher.read_text())["startup_timeout"] == 60, "Launcher save was lost")
+        # Atomic migrations retain headerless installed presets through the Rust writer.
+        original = machine / "axis-5.ini"
+        require(not original.exists(), "Axis staging fixture must not replace an existing preset")
+        preset = "[KINS]\nJOINTS = 5\nKINEMATICS = trivkins coordinates=XYZBC\n[TRAJ]\nCOORDINATES = XYZBC\n"
+        original.write_text(preset)
+        original.chmod(0o644)
+        try:
+            with tempfile.TemporaryDirectory(prefix=".axis-upgrade-", dir=launcher.parent) as stage:
+                run(helper, "stage-axis", "axis-5.ini", input=preset, cwd=stage)
+                require((Path(stage) / original.name).read_text() == preset, "Rust staging changed the installed preset")
+                (Path(stage) / original.name).unlink()
+                rejected = subprocess.run([helper, "stage-axis", "axis-5.ini"], input=preset + "; changed\n",
+                                          cwd=stage, text=True, capture_output=True)
+                require(rejected.returncode != 0 and not (Path(stage) / original.name).exists(), "Headerless staging accepted changed source")
+            rejected = subprocess.run([helper, "seed-axis", "axis-5.ini"], input=preset, text=True, capture_output=True)
+            require(rejected.returncode != 0, "Seeding accepted a headerless profile")
+            require(original.read_text() == preset, "Staging changed its source")
+        finally:
+            original.unlink()
         ini.unlink()
         ini.symlink_to("/etc/passwd")
         request({"operation": "read", "target": "ini"}, ok=False)

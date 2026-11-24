@@ -6,7 +6,7 @@ import { RemoteError } from './session.js'
 const ready = () => ({
   connected: true, axes: ['X', 'Y', 'Z', 'B', 'C'], powered: true, estop: false,
   motionMode: 'world', linearUnits: 1, angularUnits: 1, commandState: 'idle',
-  capabilities: { 'jog.start': true, 'machine.estop': true },
+  capabilities: { 'jog.start': true, 'machine.estop': true, 'machine.power': true },
   axisLimits: Object.fromEntries(['X', 'Y', 'Z', 'B', 'C'].map(name => [name, { maxVelocity: 'BC'.includes(name) ? 3 : 10 }])),
 })
 
@@ -104,6 +104,88 @@ test('joint mode does not guess an axis to joint mapping or switch motion modes'
   await assert.rejects(controller.start({ axis: 'X', direction: 1, feedRate: 100 }))
   assert.equal(controller.state.canJog, false)
   assert.equal(peer.requests.filter(item => item.method === 'command.execute').length, 0)
+})
+
+test('unhomed joint jogging uses the observed mapping and one bounded increment per press', async () => {
+  const { controller, peer } = await setup()
+  Object.assign(peer.snapshot, {
+    motionMode: 'joint', kinematicsModel: 'trivkins', jointCount: 3,
+    axes: ['X', 'Y', 'Z'], jointMap: { X: [2], Y: [0], Z: [1] }, homed: [false, false, false],
+  })
+  await controller.poll()
+  assert.equal(controller.state.canJog, true)
+  assert.equal(controller.state.jogMode, 'joint')
+  assert.equal(controller.state.canHomeAll, false)
+  await controller.start({ axis: 'X', direction: -1, feedRate: 30 })
+  assert.deepEqual(peer.requests.at(-1)?.params, {
+    action: 'jog.start', payload: { axis: 'X', direction: -1, mode: 'joint', joint: 2, velocity: 0.5, increment: 0.1 },
+  })
+  await assert.rejects(controller.start({ axis: 'Y', direction: 1, feedRate: 30 }))
+  await controller.stop()
+  assert.deepEqual(peer.requests.filter(item => item.method === 'command.execute').map(item => item.params.action), ['jog.start', 'jog.stop'])
+})
+
+test('joint jogging refuses ambiguous, duplicate, missing and out-of-range mappings', async () => {
+  for (const jointMap of [{ X: [0, 1] }, { X: [0], Y: [0] }, { X: [3] }, { X: [-1] }, { X: [0.5] }, { X: ['0'] }, {}]) {
+    const { controller, peer } = await setup()
+    Object.assign(peer.snapshot, { motionMode: 'joint', axes: ['X'], kinematicsModel: 'trivkins', jointCount: 3, jointMap })
+    await controller.poll()
+    await assert.rejects(controller.start({ axis: 'X', direction: 1, feedRate: 30 }))
+    assert.equal(peer.requests.some(item => item.method === 'command.execute'), false)
+  }
+})
+
+test('joint incremental distances follow linear and rotary machine units', async () => {
+  const { controller, peer } = await setup()
+  Object.assign(peer.snapshot, { motionMode: 'joint', kinematicsModel: 'trivkins', jointCount: 2,
+    axes: ['X', 'B'], jointMap: { X: [0], B: [1] }, linearUnits: 1 / 25.4, angularUnits: 2 })
+  await controller.poll()
+  await controller.start({ axis: 'X', direction: 1, feedRate: 30 })
+  let payload = peer.requests.at(-1)?.params.payload as Record<string, unknown>
+  assert.ok(Math.abs(Number(payload.increment) - 0.1 / 25.4) < 1e-12)
+  await controller.stop()
+  await controller.poll()
+  await controller.start({ axis: 'B', direction: -1, feedRate: 30 })
+  payload = peer.requests.at(-1)?.params.payload as Record<string, unknown>
+  assert.equal(payload.increment, 0.2)
+  assert.equal(payload.velocity, 1)
+  await controller.stop()
+})
+
+test('changing the motion mode or joint mapping stops the existing jog', async () => {
+  for (const change of [{ motionMode: 'world' }, { jointMap: { X: [1], Y: [0], Z: [2] } }]) {
+    const { controller, peer } = await setup()
+    Object.assign(peer.snapshot, { motionMode: 'joint', kinematicsModel: 'trivkins', jointCount: 3,
+      axes: ['X', 'Y', 'Z'], jointMap: { X: [0], Y: [1], Z: [2] } })
+    await controller.poll()
+    await controller.start({ axis: 'X', direction: 1, feedRate: 30 })
+    Object.assign(peer.snapshot, change)
+    await controller.poll()
+    await controller.stop()
+    assert.equal(controller.state.jogging, false)
+    assert.equal(peer.requests.filter(item => item.params.action === 'jog.stop').length, 1)
+  }
+})
+
+test('power control requires explicit fresh input and does not reset estop or home', async () => {
+  const { controller, peer, advance } = await setup()
+  peer.snapshot.powered = false
+  await controller.poll()
+  for (const invalid of [undefined, 'true', 1]) await assert.rejects(controller.setPower(invalid))
+  await controller.setPower(true)
+  assert.deepEqual(peer.requests.filter(item => item.method === 'command.execute').map(item => item.params), [
+    { action: 'machine.power', payload: { enabled: true } },
+  ])
+  peer.snapshot.estop = true
+  await controller.poll()
+  await assert.rejects(controller.setPower(true))
+  peer.snapshot.estop = false
+  await controller.poll()
+  advance(501)
+  await assert.rejects(controller.setPower(true))
+  controller.watchdog()
+  assert.equal(controller.state.canSetPower, false)
+  assert.equal(controller.state.powered, null)
 })
 
 test('release before a queued start is sent revokes it', async () => {

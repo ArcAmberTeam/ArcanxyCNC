@@ -116,6 +116,7 @@ app.whenReady().then(async () => {
     }
   })
   ipcMain.handle('control:home-all', (event, confirmed: unknown) => { authorize(event); return controller.homeAll(confirmed) })
+  ipcMain.handle('control:power', (event, enabled: unknown) => { authorize(event); return controller.setPower(enabled) })
   ipcMain.handle('control:flood', (event, enabled: unknown) => { authorize(event); return controller.setFlood(enabled) })
   ipcMain.handle('control:spindle', (event, direction: unknown, rpm?: unknown) => { authorize(event); return controller.setSpindle(direction, rpm) })
   ipcMain.handle('control:feed', (event, ratio: unknown) => { authorize(event); return controller.setFeedOverride(ratio) })

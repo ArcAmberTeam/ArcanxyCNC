@@ -9,6 +9,7 @@ ipcRenderer.on('control:state', (_event, id: number, state: ControlState) => {
 const bridge: ControlBridge = {
   getState: () => ipcRenderer.invoke('control:state'),
   homeAll: confirmed => ipcRenderer.invoke('control:home-all', confirmed),
+  setPower: enabled => ipcRenderer.invoke('control:power', enabled),
   setFlood: enabled => ipcRenderer.invoke('control:flood', enabled),
   setSpindle: (direction, rpm) => ipcRenderer.invoke('control:spindle', direction, rpm),
   setFeedOverride: ratio => ipcRenderer.invoke('control:feed', ratio),

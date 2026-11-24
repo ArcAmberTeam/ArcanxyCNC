@@ -610,7 +610,12 @@ fn command(args: &[String]) -> io::Result<()> {
             match op.as_str() {
                 "seed-axis" | "stage-axis" => {
                     let text = String::from_utf8(input(65536)?).map_err(io::Error::other)?;
-                    if !text.starts_with(HEADER) {
+                    // A migration may preserve the original headerless active preset,
+                    // but cannot substitute caller-provided contents for that source.
+                    if !text.starts_with(HEADER)
+                        && (op != "stage-axis"
+                            || configuration::load(&active.with_file_name(name))?.content != text)
+                    {
                         return Err(io::Error::other("Missing preset source"));
                     }
                     check_layout(&text, count)?;

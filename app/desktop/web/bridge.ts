@@ -111,6 +111,9 @@ export interface ControlState {
   serviceConnected: boolean
   connected: boolean
   canJog: boolean
+  jogMode: 'joint' | 'world' | null
+  canSetPower: boolean
+  powered: boolean | null
   canHomeAll: boolean
   programFile: string | null
   canStartCycle: boolean
@@ -125,6 +128,7 @@ export interface ControlState {
 }
 
 export interface ControlBridge {
+  setPower(enabled: boolean): Promise<void>
   homeAll(clearanceConfirmed: true): Promise<void>
   setSpindle(direction: -1 | 0 | 1, rpm?: number): Promise<void>
   setFlood(enabled: boolean): Promise<void>
@@ -142,7 +146,7 @@ export interface ControlBridge {
 
 export function offlineState(reason: string): ControlState {
   return {
-    serviceConnected: false, connected: false, canJog: false, canHomeAll: false, canEstop: false, estop: null,
+    serviceConnected: false, connected: false, canJog: false, jogMode: null, canSetPower: false, powered: null, canHomeAll: false, canEstop: false, estop: null,
     programFile: null, canStartCycle: false, jogging: false, axes: {}, activeAxes: null, readings: null, reason, error: '', commandState: 'disconnected',
   }
 }
