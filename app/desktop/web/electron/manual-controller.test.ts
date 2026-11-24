@@ -106,8 +106,8 @@ test('joint mode does not guess an axis to joint mapping or switch motion modes'
   assert.equal(peer.requests.filter(item => item.method === 'command.execute').length, 0)
 })
 
-test('unhomed joint jogging uses the observed mapping and one bounded increment per press', async () => {
-  const { controller, peer } = await setup()
+test('unhomed joint jogging remains continuous while held and stops on release', async () => {
+  const { controller, peer, advance } = await setup()
   Object.assign(peer.snapshot, {
     motionMode: 'joint', kinematicsModel: 'trivkins', jointCount: 3,
     axes: ['X', 'Y', 'Z'], jointMap: { X: [2], Y: [0], Z: [1] }, homed: [false, false, false],
@@ -118,10 +118,22 @@ test('unhomed joint jogging uses the observed mapping and one bounded increment 
   assert.equal(controller.state.canHomeAll, false)
   await controller.start({ axis: 'X', direction: -1, feedRate: 30 })
   assert.deepEqual(peer.requests.at(-1)?.params, {
-    action: 'jog.start', payload: { axis: 'X', direction: -1, mode: 'joint', joint: 2, velocity: 0.5, increment: 0.1 },
+    action: 'jog.start', payload: { axis: 'X', direction: -1, mode: 'joint', joint: 2, velocity: 0.5, increment: 0 },
   })
   await assert.rejects(controller.start({ axis: 'Y', direction: 1, feedRate: 30 }))
+  for (let sample = 0; sample < 20; sample++) {
+    advance(100)
+    controller.heartbeat()
+    await controller.poll()
+    controller.watchdog()
+    assert.equal(controller.state.jogging, true)
+    assert.deepEqual(peer.requests.at(-1), { method: 'session.status', params: { jog_lease: true } })
+  }
+  assert.deepEqual(peer.requests.filter(item => item.method === 'command.execute').map(item => item.params.action), ['jog.start'])
   await controller.stop()
+  await controller.poll()
+  assert.equal(controller.state.jogging, false)
+  assert.deepEqual(peer.requests.at(-1), { method: 'session.status', params: { jog_lease: false } })
   assert.deepEqual(peer.requests.filter(item => item.method === 'command.execute').map(item => item.params.action), ['jog.start', 'jog.stop'])
 })
 
@@ -135,19 +147,20 @@ test('joint jogging refuses ambiguous, duplicate, missing and out-of-range mappi
   }
 })
 
-test('joint incremental distances follow linear and rotary machine units', async () => {
+test('continuous joint feeds follow linear and rotary machine units', async () => {
   const { controller, peer } = await setup()
   Object.assign(peer.snapshot, { motionMode: 'joint', kinematicsModel: 'trivkins', jointCount: 2,
     axes: ['X', 'B'], jointMap: { X: [0], B: [1] }, linearUnits: 1 / 25.4, angularUnits: 2 })
   await controller.poll()
   await controller.start({ axis: 'X', direction: 1, feedRate: 30 })
   let payload = peer.requests.at(-1)?.params.payload as Record<string, unknown>
-  assert.ok(Math.abs(Number(payload.increment) - 0.1 / 25.4) < 1e-12)
+  assert.equal(payload.increment, 0)
+  assert.ok(Math.abs(Number(payload.velocity) - 0.5 / 25.4) < 1e-12)
   await controller.stop()
   await controller.poll()
   await controller.start({ axis: 'B', direction: -1, feedRate: 30 })
   payload = peer.requests.at(-1)?.params.payload as Record<string, unknown>
-  assert.equal(payload.increment, 0.2)
+  assert.equal(payload.increment, 0)
   assert.equal(payload.velocity, 1)
   await controller.stop()
 })

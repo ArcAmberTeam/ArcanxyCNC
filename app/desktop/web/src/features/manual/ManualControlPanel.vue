@@ -127,17 +127,17 @@ onUnmounted(() => emit('stop'))
       </div>
       <div v-else class="axis-modules" :class="{ 'linear-only': !rotaryPads.length }">
         <section v-if="xy.length" class="axis-module" aria-labelledby="xy-title">
-          <h2 id="xy-title">{{ xy.join('') }}<span v-if="state.jogMode === 'joint'"> · 0.1 mm</span></h2>
+          <h2 id="xy-title">{{ xy.join('') }}</h2>
           <AxisJogPad :label="xy.join('')" :vertical-axis="xy.includes('Y') ? 'Y' : 'X'" :horizontal-axis="xy.length === 2 ? 'X' : undefined" :state="state" @start="start" @stop="emit('stop')" />
         </section>
 
         <section v-if="displayedAxes.includes('Z')" class="axis-module" aria-labelledby="z-title">
-          <h2 id="z-title">Z<span v-if="state.jogMode === 'joint'"> · 0.1 mm</span></h2>
+          <h2 id="z-title">Z</h2>
           <AxisJogPad label="Z" vertical-axis="Z" :state="state" @start="start" @stop="emit('stop')" />
         </section>
 
         <section v-for="pad in rotaryPads" :key="pad.label" class="axis-module" :aria-label="pad.label + ' 旋转控制'">
-          <h2>{{ pad.label }}<span v-if="state.jogMode === 'joint'"> · 0.1°</span></h2>
+          <h2>{{ pad.label }}</h2>
           <AxisJogPad :label="pad.label" :vertical-axis="pad.vertical" :horizontal-axis="pad.horizontal" :state="state" @start="start" @stop="emit('stop')" />
         </section>
       </div>

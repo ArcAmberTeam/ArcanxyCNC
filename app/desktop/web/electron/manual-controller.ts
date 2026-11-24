@@ -194,7 +194,7 @@ export class ManualController {
       const result = await this.transport.request('command.execute', {
         action: 'jog.start', payload: {
           axis, direction, mode, ...(mode === 'joint' ? { joint } : {}),
-          velocity: feedRate * units / 60, increment: mode === 'joint' ? 0.1 * units : 0,
+          velocity: feedRate * units / 60, increment: 0,
         },
       }, () => generation === this.generation && this.held && this.sameJogTarget() && this.fresh()
         && this.now() - this.sampledAt < 500 && feedRate <= (this.state.axes[axis]?.maxFeed ?? 0))

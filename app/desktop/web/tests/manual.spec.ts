@@ -141,6 +141,31 @@ test('axis directions map to the requested controls and mouse release stops', as
   }
 })
 
+test('long pointer and keyboard holds keep one jog active until release', async ({ page }) => {
+  await connect(page, ['X', 'Y', 'Z'])
+  const button = page.getByRole('button', { name: 'X 轴正向' })
+  const calls = () => page.evaluate(() => (window as unknown as { controlTestCalls: unknown[] }).controlTestCalls)
+  for (const input of ['pointer', 'keyboard']) {
+    const before = (await calls()).length
+    if (input === 'pointer') {
+      const box = await button.boundingBox()
+      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
+      await page.mouse.down()
+    } else {
+      await button.focus()
+      await page.keyboard.down('Space')
+      await page.keyboard.down('Space')
+    }
+    await page.waitForTimeout(1200)
+    await expect(button).toHaveAttribute('aria-pressed', 'true')
+    expect((await calls()).slice(before)).toEqual([{ axis: 'X', direction: 1, feedRate: 100 }])
+    if (input === 'pointer') await page.mouse.up()
+    else await page.keyboard.up('Space')
+    await expect(button).toHaveAttribute('aria-pressed', 'false')
+    expect((await calls()).slice(before)).toEqual([{ axis: 'X', direction: 1, feedRate: 100 }, 'stop'])
+  }
+})
+
 test('dragging out, keyboard release, and switching sections cancel a hold', async ({ page }) => {
   await connect(page)
   const button = page.getByRole('button', { name: 'X 轴正向' })
