@@ -213,7 +213,9 @@ class Controller:
             self._require(s["connected"] and s["taskState"] == "estop", "机床急停状态已变化")
             self._require(not s["powered"] and not s["busy"] and not self._jogs, "机床必须停止")
             self._require(not s["limitOverride"] and s["spindleDirection"] == 0, "回零条件已变化")
-            self._require(self._config.can_home_all(), self._config.homing_message or "回零配置无效")
+            self._require(
+                self._config.can_home_all(), self._config.homing_message or "回零配置无效"
+            )
             return
         if name == "cyclePower":
             s = self._snapshot

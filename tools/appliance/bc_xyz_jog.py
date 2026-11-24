@@ -109,11 +109,11 @@ def validate_destination(files, prepared):
         and files.get(HAL) == prepared[HAL]
     ):
         return "already-current"
-    if (
-        hashlib.sha256(files.get("axis-3.ini", b"")).hexdigest()
-        == PREVIOUS_JOG["axis-3.ini"]
-        and hashlib.sha256(files.get(HAL, b"")).hexdigest()
-        in (PREVIOUS_JOG[HAL], CORRECTED_XY_HAL)
+    if hashlib.sha256(files.get("axis-3.ini", b"")).hexdigest() == PREVIOUS_JOG[
+        "axis-3.ini"
+    ] and hashlib.sha256(files.get(HAL, b"")).hexdigest() in (
+        PREVIOUS_JOG[HAL],
+        CORRECTED_XY_HAL,
     ):
         return "correct-jog"
     if (
@@ -166,12 +166,15 @@ def commission_homing(files):
     ini.write(output)
     updated = dict(jogging)
     updated["axis-3.ini"] = output.getvalue().encode()
-    updated[HAL] = jogging[HAL].replace(
-        b"setp motion.homing-inhibit true\n", b"setp motion.homing-inhibit false\n"
-    ) + "".join(
-        f"setp joint.{joint}.home-backoff-vel [JOINT_{joint}]HOME_BACKOFF_VEL\n"
-        for joint in range(3)
-    ).encode()
+    updated[HAL] = (
+        jogging[HAL].replace(
+            b"setp motion.homing-inhibit true\n", b"setp motion.homing-inhibit false\n"
+        )
+        + "".join(
+            f"setp joint.{joint}.home-backoff-vel [JOINT_{joint}]HOME_BACKOFF_VEL\n"
+            for joint in range(3)
+        ).encode()
+    )
     names = ("axis-3.ini", HAL)
     if all(files.get(name) == updated[name] for name in names):
         return updated, "already-current"
