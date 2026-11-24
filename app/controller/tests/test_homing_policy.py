@@ -224,18 +224,20 @@ class HomingPolicyTests(unittest.TestCase):
                 self.assertEqual(vendor.calls, [])
 
     def test_sequential_bc_homing_has_a_bounded_longer_completion_window(self):
-        vendor = bc_profile()
-        clock = FakeClock()
-        controller = Controller(module=vendor, clock=clock)
-        self.assertTrue(controller.dispatch("machine.home-all"))
-        vendor.confirm(apply=False)
-        vendor.status.joint[2]["homing"] = True
-        vendor.status.inpos = False
-        clock.now = 600
-        self.assertEqual(controller.poll()["commandState"], "sent")
-        clock.now = 901
-        self.assertEqual(controller.poll()["commandState"], "unknown")
-        self.assertEqual(vendor.calls, [("home", (-1,))])
+        for action in ("machine.home-all", "machine.power-and-home"):
+            with self.subTest(action=action):
+                vendor = bc_profile()
+                clock = FakeClock()
+                controller = Controller(module=vendor, clock=clock)
+                self.assertTrue(controller.dispatch(action, {"clearanceConfirmed": True}))
+                vendor.confirm(apply=False)
+                vendor.status.joint[2]["homing"] = True
+                vendor.status.inpos = False
+                clock.now = 600
+                self.assertEqual(controller.poll()["commandState"], "sent")
+                clock.now = 901
+                self.assertEqual(controller.poll()["commandState"], "unknown")
+                self.assertEqual(vendor.calls, [("home", (-1,))])
 
     def test_home_all_finishes_when_only_configured_xyz_finish(self):
         vendor = six_joint_vendor()

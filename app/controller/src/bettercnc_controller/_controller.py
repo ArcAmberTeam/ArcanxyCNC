@@ -817,6 +817,8 @@ class Controller:
                         ),
                     )
                 )
+                if home:
+                    steps[-1].phase = "homing"
             return steps
         if action in ("jog.start", "machine.jog-plus", "machine.jog-minus"):
             self._guard("jog")
