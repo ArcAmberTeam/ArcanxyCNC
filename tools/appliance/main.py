@@ -59,6 +59,14 @@ def main():
         "prepare-bc-xyz-jog",
         help="Prepare the captured BC installation for bounded XYZ direction checks",
     )
+    commissioning = commands.add_parser(
+        "commission-bc-xyz-homing",
+        help="Enable fixed XYZ homing after onsite motor and travel acceptance",
+    )
+    commissioning.add_argument(
+        "--directions-confirmed", action="store_true", required=True
+    )
+    commissioning.add_argument("--travel-confirmed", action="store_true", required=True)
     stage = commands.add_parser(
         "stage", help="Preview a machine import in a new staging directory"
     )
@@ -190,6 +198,8 @@ def main():
             axis_profiles.AxisProfileStore().seed()
     elif args.action == "prepare-bc-xyz-jog":
         print("BC XYZ jogging preset: " + _axis_upgrade.upgrade(xyz_jog=True))
+    elif args.action == "commission-bc-xyz-homing":
+        print("BC XYZ homing profile: " + _axis_upgrade.upgrade(xyz_homing=True))
     elif args.action == "backup":
         print(json.dumps(_backup.backup()))
     elif args.action == "prepare":

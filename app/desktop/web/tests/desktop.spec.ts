@@ -86,7 +86,7 @@ test('sandboxed desktop bridge sends real framed requests and stops on release a
     await page.keyboard.down('Space')
     await expect.poll(() => commands.filter(item => item.action === 'jog.start').length).toBe(1)
     expect(commands.find(item => item.action === 'jog.start')?.payload).toEqual({
-      axis: 'X', direction: 1, mode: 'world', velocity: 100 / 60, increment: 0,
+      axis: 'X', direction: 1, mode: 'world', velocity: 10, increment: 0,
     })
     await page.keyboard.up('Space')
     await expect.poll(() => jogging).toBe(false)

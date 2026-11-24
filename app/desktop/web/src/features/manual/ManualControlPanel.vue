@@ -53,7 +53,7 @@ const rotaryPads = computed(() => {
   }
   return pads
 })
-const linearFeed = 100
+const linearFeed = 900
 const rotaryFeed = 30
 function start(axis: JogAxis, direction: JogDirection) {
   const limit = props.state.axes[axis]?.maxFeed
@@ -102,7 +102,7 @@ onUnmounted(() => emit('stop'))
           </DialogTrigger>
           <DialogContent class="sm:max-w-sm" :show-close-button="false">
             <DialogTitle>确认回零</DialogTitle>
-            <DialogDescription>请确认各轴回零路径无遮挡，人员已离开运动范围。确认后，机床将自动使能并按配置顺序回零。</DialogDescription>
+            <DialogDescription>请确认各轴回零路径无遮挡，人员已离开运动范围。确认后，机床将解除急停、自动使能并按配置顺序回零。</DialogDescription>
             <DialogFooter>
               <DialogClose as-child><Button type="button" variant="outline">取消</Button></DialogClose>
               <Button type="button" :disabled="!state.canHomeAll || submittingHome" @click="confirmHome">确认无遮挡并回零</Button>

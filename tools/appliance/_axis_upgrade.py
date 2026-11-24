@@ -384,13 +384,16 @@ def _lease(root, path):
             os.close(descriptor)
 
 
-def _prepare_xyz_jog(root, config):
+def _prepare_xyz_jog(root, config, *, homing=False):
     # Share both existing maintenance leases; the launcher holds LEASE while live.
     with _lease(root, UPDATE_LOCK), _lease(root, LEASE):
         with _directory(config, "machine") as machine:
             installed = {name: _read(machine, name) for name in os.listdir(machine)}
-        updated = bc_xyz_jog.prepare(installed)
-        state = bc_xyz_jog.validate_destination(installed, updated)
+        if homing:
+            updated, state = bc_xyz_jog.commission_homing(installed)
+        else:
+            updated = bc_xyz_jog.prepare(installed)
+            state = bc_xyz_jog.validate_destination(installed, updated)
         launcher = _read(config, "launcher.json")
         selected = json.loads(launcher).get("ini")
         if selected not in (
@@ -398,6 +401,8 @@ def _prepare_xyz_jog(root, config):
             "/etc/betterlinuxcnc/machine/axis-3.ini",
         ) or (state == "prepare" and not selected.endswith("axis-5.ini")):
             raise ValueError("Launcher does not select the captured BC installation")
+        if homing and not selected.endswith("axis-3.ini"):
+            raise ValueError("Commissioning requires the selected XYZ jogging profile")
         if state == "already-current":
             return state
         _stopped(root)
@@ -418,7 +423,7 @@ def _prepare_xyz_jog(root, config):
 # --------#
 
 
-def upgrade(*, xyz_jog=False):
+def upgrade(*, xyz_jog=False, xyz_homing=False):
     """Fixed root-only migration, also reached by the unchanged package postinst."""
     with _directory(None, "/") as root, contextlib.ExitStack() as stack:
         try:
@@ -438,6 +443,8 @@ def upgrade(*, xyz_jog=False):
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError("Invalid axis migration lock")
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return _prepare_xyz_jog(root, config) if xyz_jog else _upgrade(root, config)
+            if xyz_jog or xyz_homing:
+                return _prepare_xyz_jog(root, config, homing=xyz_homing)
+            return _upgrade(root, config)
         finally:
             os.close(lock)

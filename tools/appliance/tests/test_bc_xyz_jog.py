@@ -14,7 +14,7 @@ BOOTSTRAP = r"""
 import json, os, pwd, runpy, subprocess, sys
 from pathlib import Path
 from types import SimpleNamespace
-script, directory, fault = sys.argv[1:]
+script, directory, fault, action = sys.argv[1:]
 root = Path(directory)
 real_open, real_fstat, real_fsync = os.open, os.fstat, os.fsync
 def opened(path, flags, *args, **kwargs):
@@ -55,7 +55,7 @@ def sync(fd):
     real_fsync(fd)
 os.open, os.fstat, os.geteuid, os.fsync = opened, info, lambda: 0, sync
 pwd.getpwnam, subprocess.run = account, run
-sys.argv = [script, 'prepare-bc-xyz-jog']
+sys.argv = [script, *json.loads(action)]
 runpy.run_path(script, run_name='__main__')
 """
 
@@ -84,7 +84,7 @@ class BcXyzJogTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch(mode=0o600)
 
-    def invoke(self, fault=""):
+    def invoke(self, fault="", action=None):
         return subprocess.run(
             [
                 sys.executable,
@@ -94,6 +94,7 @@ class BcXyzJogTests(unittest.TestCase):
                 str(installation.MODULE / "main.py"),
                 str(self.root),
                 fault,
+                json.dumps(action or ["prepare-bc-xyz-jog"]),
             ],
             capture_output=True,
             text=True,
@@ -134,14 +135,18 @@ class BcXyzJogTests(unittest.TestCase):
             (2, "Z", (-50, 0)),
         ):
             section = ini[f"JOINT_{joint}"]
-            self.assertEqual(section.getfloat("STEP_SCALE"), 320)
-            self.assertEqual(section.getfloat("MAX_VELOCITY"), 0.5)
-            self.assertEqual(section.getfloat("MAX_ACCELERATION"), 5)
+            self.assertEqual(
+                section.getfloat("STEP_SCALE"), -320 if axis == "Z" else 320
+            )
+            self.assertEqual(section.getfloat("MAX_VELOCITY"), 15)
+            self.assertEqual(section.getfloat("MAX_ACCELERATION"), 50)
+            self.assertEqual(section.getfloat("STEPGEN_MAXVEL"), 18.75)
+            self.assertEqual(section.getfloat("STEPGEN_MAXACCEL"), 62.5)
             self.assertEqual(section.getint("HOME_SEQUENCE"), 1000)
             self.assertEqual(
                 (section.getfloat("MIN_LIMIT"), section.getfloat("MAX_LIMIT")), limits
             )
-            self.assertEqual(ini[f"AXIS_{axis}"].getfloat("MAX_VELOCITY"), 0.5)
+            self.assertEqual(ini[f"AXIS_{axis}"].getfloat("MAX_VELOCITY"), 15)
             stepgen = (1, 0, 2)[joint]
             self.assertIn(
                 f"joint.{joint}.amp-enable-out => hm2_7i92.0.stepgen.{stepgen:02}.enable",
@@ -192,7 +197,7 @@ class BcXyzJogTests(unittest.TestCase):
             json.dumps({"ini": "/etc/betterlinuxcnc/machine/axis-3.ini"})
         )
 
-    def test_corrects_captured_jog_outputs_without_changing_inputs_or_ini(self):
+    def test_corrects_jog_outputs_preserving_inputs_and_other_profiles(self):
         self.installed_jog()
         before = self.contents()
         launcher = (self.config / "launcher.json").read_bytes()
@@ -201,8 +206,15 @@ class BcXyzJogTests(unittest.TestCase):
         after = self.contents()
         self.assertEqual(set(after), set(before))
         for name, content in before.items():
-            if name != "bc-xyz-jog.hal":
+            if name not in ("bc-xyz-jog.hal", "axis-3.ini"):
                 self.assertEqual(after[name], content)
+        ini = configparser.ConfigParser(interpolation=None)
+        ini.read_string(after["axis-3.ini"].decode())
+        self.assertEqual(ini["JOINT_2"].getfloat("STEP_SCALE"), -320)
+        self.assertEqual(ini["JOINT_2"].getfloat("MAX_VELOCITY"), 15)
+        self.assertEqual(ini["AXIS_Z"].getfloat("MIN_LIMIT"), -50)
+        self.assertEqual(ini["AXIS_Z"].getfloat("MAX_LIMIT"), 0)
+        self.assertEqual(ini["BETTERCNC_HOMING"]["MOTOR_DIRECTIONS_VERIFIED"], "NO")
         self.assertEqual((self.config / "launcher.json").read_bytes(), launcher)
         hal = after["bc-xyz-jog.hal"].decode()
         for joint, axis, stepgen in ((0, "x", 1), (1, "y", 0), (2, "z", 2)):
@@ -221,6 +233,65 @@ class BcXyzJogTests(unittest.TestCase):
         again = self.invoke()
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertIn("already-current", again.stdout)
+        self.assertEqual(self.contents(), after)
+
+    def test_updates_the_captured_xy_corrected_profile(self):
+        self.installed_jog()
+        (self.machine / "bc-xyz-jog.hal").write_bytes(
+            (installation.MODULE / "templates/bc-xyz-jog.hal").read_bytes()
+        )
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        ini = configparser.ConfigParser(interpolation=None)
+        ini.read(self.machine / "axis-3.ini")
+        self.assertEqual(ini["JOINT_2"].getfloat("STEP_SCALE"), -320)
+
+    def test_homing_requires_explicit_acceptance_of_the_corrected_profile(self):
+        self.installed_jog()
+        action = [
+            "commission-bc-xyz-homing",
+            "--directions-confirmed",
+            "--travel-confirmed",
+        ]
+        before = self.contents()
+        self.assertNotEqual(self.invoke(action=action).returncode, 0)
+        self.assertEqual(self.contents(), before)
+        prepared = self.invoke()
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+        before = self.contents()
+        for arguments in (action[:1], action[:2], [action[0], action[2]]):
+            self.assertNotEqual(self.invoke(action=arguments).returncode, 0)
+            self.assertEqual(self.contents(), before)
+        result = self.invoke(action=action)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = self.contents()
+        for name, content in before.items():
+            if name not in ("axis-3.ini", "bc-xyz-jog.hal"):
+                self.assertEqual(after[name], content)
+        ini = configparser.ConfigParser(interpolation=None)
+        ini.read_string(after["axis-3.ini"].decode())
+        self.assertEqual(ini["BETTERCNC_HOMING"]["MOTOR_DIRECTIONS_VERIFIED"], "YES")
+        for joint, axis, sequence, maximum in (
+            (0, "X", 2, 580),
+            (1, "Y", 3, 380),
+            (2, "Z", 1, 50),
+        ):
+            section = ini[f"JOINT_{joint}"]
+            self.assertEqual(section.getint("HOME_SEQUENCE"), sequence)
+            self.assertEqual(section.getfloat("HOME"), 0)
+            self.assertEqual(section.getfloat("HOME_OFFSET"), -5)
+            self.assertEqual(section.getfloat("HOME_SEARCH_VEL"), -2)
+            self.assertEqual(section.getfloat("HOME_LATCH_VEL"), -0.5)
+            self.assertEqual(section.getfloat("HOME_BACKOFF_VEL"), 1)
+            for section in (ini[f"JOINT_{joint}"], ini[f"AXIS_{axis}"]):
+                self.assertEqual(section.getfloat("MIN_LIMIT"), -0.1)
+                self.assertEqual(section.getfloat("MAX_LIMIT"), maximum)
+        self.assertIn(b"setp motion.homing-inhibit false", after["bc-xyz-jog.hal"])
+        again = self.invoke(action=action)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("already-current", again.stdout)
+        self.assertEqual(self.contents(), after)
+        self.assertNotEqual(self.invoke().returncode, 0)
         self.assertEqual(self.contents(), after)
 
     def test_mapping_correction_rejects_onsite_edits_and_backup_failure(self):

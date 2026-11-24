@@ -181,9 +181,10 @@ class Controller:
                 cam_active or self._action in ("program.home-and-run", "machine.power-and-home")
             ):
                 step = self._steps[0]
-                waiting_for_power = step.guard == "cyclePower"
+                waiting_for_reset = step.guard == "homeReset"
+                waiting_for_power = step.guard == "cyclePower" or waiting_for_reset
                 if (
-                    self._snapshot["estop"]
+                    (self._snapshot["estop"] and not waiting_for_reset)
                     or (not self._snapshot["powered"] and not waiting_for_power)
                     or (step.required_file and self._snapshot["file"] != step.required_file)
                     or (step.phase != "homing" and not all(self._snapshot["homed"]))
@@ -207,6 +208,13 @@ class Controller:
             raise ValueError(message)
 
     def _guard(self, name):
+        if name == "homeReset":
+            s = self._snapshot
+            self._require(s["connected"] and s["taskState"] == "estop", "机床急停状态已变化")
+            self._require(not s["powered"] and not s["busy"] and not self._jogs, "机床必须停止")
+            self._require(not s["limitOverride"] and s["spindleDirection"] == 0, "回零条件已变化")
+            self._require(self._config.can_home_all(), self._config.homing_message or "回零配置无效")
+            return
         if name == "cyclePower":
             s = self._snapshot
             self._require(s["connected"] and not s["estop"], "请先解除急停")
@@ -338,7 +346,7 @@ class Controller:
                     if not self._steps:
                         self._result("completed", "LinuxCNC 已确认命令：" + self._action)
                         return
-                elif elapsed > 300 and step.phase == "homing":
+                elif elapsed > self._config.homing_timeout and step.phase == "homing":
                     self._result("unknown", "回零超时，取消后续加工；请检查实际机床状态")
                     return
                 elif elapsed > 10 and (
@@ -472,14 +480,25 @@ class Controller:
         self._require(not self._steps and not self._jogs, "上一条命令尚未完成")
         self._require(not self._cam_job or self._cam_job["state"] not in ACTIVE, "已有 CAM 作业")
 
-    def _homing_setup(self, clearance_confirmed, *, power_on):
+    def _homing_setup(self, clearance_confirmed, *, power_on, reset_estop=False):
         self._require(clearance_confirmed is True, "必须确认当前装夹下的全部回零路径无干涉")
+        reset = reset_estop and self._snapshot["estop"]
         enable = power_on and not self._snapshot["powered"]
-        self._guard("cyclePower" if enable else "idle")
+        self._guard("homeReset" if reset else "cyclePower" if enable else "idle")
         self._require(not self._snapshot["limitOverride"], "回零禁止限位覆盖")
         self._require(self._snapshot["spindleDirection"] == 0, "回零要求主轴已停止")
         self._require(self._config.can_home_all(), self._config.homing_message or "回零配置无效")
         steps = []
+        if reset:
+            steps.append(
+                self._step(
+                    "state",
+                    self._constant("STATE_ESTOP_RESET"),
+                    guard="homeReset",
+                    expected=lambda: not self._snapshot["estop"]
+                    and self._snapshot["taskState"] in ("off", "estop-reset"),
+                )
+            )
         if enable:
             steps.append(
                 self._step(
@@ -660,7 +679,9 @@ class Controller:
             return [self._step("state", target, expected=lambda: self._stat.task_state == target)]
         if action == "machine.power-and-home":
             self._cam_idle()
-            steps = self._homing_setup(payload.get("clearanceConfirmed"), power_on=True)
+            steps = self._homing_setup(
+                payload.get("clearanceConfirmed"), power_on=True, reset_estop=True
+            )
             return [*steps, self._home_all_step()]
         if action == "program.home-and-run":
             path = s["file"]
@@ -1103,8 +1124,10 @@ class Controller:
             and free
             and not s["busy"]
             and not self._jogs
-            and not s["estop"]
-            and (s["powered"] or s["taskState"] in ("off", "estop-reset"))
+            and (
+                (not s["estop"] and (s["powered"] or s["taskState"] in ("off", "estop-reset")))
+                or (s["estop"] and not s["powered"] and s["taskState"] == "estop")
+            )
             and home_all_ready
             and not s["limitOverride"]
             and s["spindleDirection"] == 0
@@ -1119,6 +1142,7 @@ class Controller:
             "spindle.stop": connected,
             "machine.power-and-home": can_power_home,
             "program.home-and-run": can_power_home
+            and not s["estop"]
             and bool(s["file"])
             and len(self._config.home_all_joints) == self._config.joints
             and not s["blockDelete"],

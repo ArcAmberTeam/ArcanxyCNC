@@ -83,6 +83,13 @@ class Configuration:
             or self.get("BETTERCNC_HOMING", "PROFILE") == "zhulong-v2"
         )
         self.homing_message = self._homing_policy() if self.dedicated_homing else ""
+        # Sequential BC searches can exceed 300 s across the full 600/400/90 mm
+        # envelope at 2 mm/s, before the double-touch retreats and settling time.
+        self.homing_timeout = (
+            900
+            if self.get("BETTERCNC_HOMING", "CONFIGURATION_REVISION") == "bc-xyz-homing-20261124"
+            else 300
+        )
 
     def _homing_policy(self):
         """Validate the effective, package-prepared INI; never infer measured travel."""
@@ -101,14 +108,17 @@ class Configuration:
         if (self.get(section, "MOTOR_MAPPING_VERIFIED") or "").upper() != "YES":
             return "回零未配置：XYZ 电机通道与实机轴尚未核验；开关验证不能代替电机验证"
         if (self.get(section, "MOTOR_DIRECTIONS_VERIFIED") or "").upper() != "YES":
-            return "回零未配置：电机方向尚未核验；实机应为 X 向后、Y 向左、Z 向下"
+            return "回零未配置：电机方向尚未核验，请先逐轴点动确认方向"
         if self.home_all_joints != [0, 1, 2] or any(
             self.joint_map.get(axis) != [joint] for joint, axis in enumerate("XYZ")
         ):
             return "回零未配置：XYZ joint 映射或 HOME ALL 集合不匹配"
         revision = self.get(section, "CONFIGURATION_REVISION")
         parallel = revision == "zhulong-xyz-v5-20261026"
-        commissioned = parallel or revision == "zhulong-xyz-20261026"
+        bc = revision == "bc-xyz-homing-20261124"
+        commissioned = parallel or bc or revision == "zhulong-xyz-20261026"
+        if bc and self.get(section, "TRAVEL_SOURCE") != "OPERATOR_CONFIRMED_ENVELOPE":
+            return "回零未配置：BC 三轴可用行程尚未确认"
         if parallel and (
             self.get(section, "PARALLEL_TEST_CONDITION") != "EMPTY_TABLE_NO_TOOL"
             or self.number(section, "SWITCH_OVERRUN_MM") != 1
@@ -121,8 +131,12 @@ class Configuration:
         ):
             travel = self.number(section, f"TRAVEL_{axis}_MM")
             if travel is None or travel <= 15:
-                return f"回零未配置：{axis} 轴缺少大于 15 mm 的实测可用总行程"
+                return f"回零未配置：{axis} 轴缺少大于 15 mm 的已确认可用总行程"
             joint_section = "JOINT_" + str(joint)
+            expected_scale = -320 if joint == 2 else 320
+            if bc and self.number(joint_section, "STEP_SCALE") != expected_scale:
+                return f"回零未配置：{axis} 轴脉冲当量或方向已改变，需要重新核验"
+            sequence = (2, 3, 1)[joint] if bc else 1 if parallel else joint + 1
             search = self.number(joint_section, "HOME_SEARCH_VEL")
             latch = self.number(joint_section, "HOME_LATCH_VEL")
             final = self.number(joint_section, "HOME_FINAL_VEL")
@@ -137,16 +151,16 @@ class Configuration:
                 or not 0 < final <= 5
                 or self.number(joint_section, "HOME") != 0
                 or self.number(joint_section, "HOME_OFFSET") != direction * 5
-                or self.home_sequences[joint] != (1 if parallel else joint + 1)
+                or self.home_sequences[joint] != sequence
                 or (self.get(joint_section, "HOME_IGNORE_LIMITS") or "").upper() != "YES"
                 or (self.get(joint_section, "HOME_USE_INDEX") or "").upper() != "NO"
             ):
                 return f"回零未配置：{axis} 轴搜索、定位或退开参数不符合已验证配置"
-            if parallel:
+            if parallel or bc:
                 acceleration = self.number(joint_section, "MAX_ACCELERATION")
                 backoff = self.number(joint_section, "HOME_BACKOFF_VEL")
-                # Reserve half the reported 1 mm overrun. This is a configured
-                # braking budget (including 10 ms detection/control allowance),
+                # Keep a 0.5 mm braking budget including 10 ms detection/control
+                # allowance. This checks the configured deceleration only,
                 # not proof of the actual motor deceleration or machine latency.
                 if (
                     acceleration is None
@@ -159,7 +173,7 @@ class Configuration:
                 ):
                     return f"回零未配置：{axis} 轴速度、减速预算或慢退速度不符合开关余量"
             lower, upper = (-travel + 10, 0) if direction > 0 else (0, travel - 10)
-            if parallel:
+            if parallel or bc:
                 lower = -0.1
             for limits in ("AXIS_" + axis, joint_section):
                 minimum = self.number(limits, "MIN_LIMIT")
@@ -169,9 +183,9 @@ class Configuration:
                     or maximum is None
                     or not lower <= minimum <= 0 <= maximum <= upper
                     or minimum >= maximum
-                    or (parallel and minimum != -0.1)
+                    or ((parallel or bc) and minimum != -0.1)
                 ):
-                    return f"回零未配置：{axis} 轴软限位未落在实测行程内"
+                    return f"回零未配置：{axis} 轴软限位未落在已确认行程内"
         return ""
 
     def can_home(self, joints):

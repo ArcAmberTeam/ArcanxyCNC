@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from test_controller import FakeLinuxCNC
+from test_controller import FakeClock, FakeLinuxCNC
 
 from bettercnc_controller import Controller
 
@@ -80,6 +80,35 @@ def parallel_profile():
     return vendor
 
 
+def bc_profile():
+    vendor = parallel_profile()
+    vendor.ini_values.update(
+        {
+            ("BETTERCNC_HOMING", "CONFIGURATION_REVISION"): "bc-xyz-homing-20261124",
+            ("BETTERCNC_HOMING", "TRAVEL_SOURCE"): "OPERATOR_CONFIRMED_ENVELOPE",
+        }
+    )
+    for joint, axis, travel, maximum, sequence in (
+        (0, "X", 600, 580, 2),
+        (1, "Y", 400, 380, 3),
+        (2, "Z", 90, 50, 1),
+    ):
+        vendor.ini_values[("BETTERCNC_HOMING", f"TRAVEL_{axis}_MM")] = str(travel)
+        for key, value in {
+            "STEP_SCALE": "-320" if axis == "Z" else "320",
+            "HOME_SEARCH_VEL": "-2",
+            "HOME_LATCH_VEL": "-0.5",
+            "HOME_BACKOFF_VEL": "1",
+            "HOME_FINAL_VEL": "2",
+            "HOME_SEQUENCE": str(sequence),
+            "MAX_ACCELERATION": "50",
+        }.items():
+            vendor.ini_values[(f"JOINT_{joint}", key)] = value
+        for section in (f"JOINT_{joint}", f"AXIS_{axis}"):
+            vendor.ini_values[(section, "MAX_LIMIT")] = str(maximum)
+    return vendor
+
+
 class HomingPolicyTests(unittest.TestCase):
     def setUp(self):
         self.environment = patch.dict(os.environ, {"BETTERCNC_KIOSK": "0"})
@@ -130,6 +159,83 @@ class HomingPolicyTests(unittest.TestCase):
         vendor.status.estop = True
         self.assertEqual(controller.poll()["commandState"], "error")
         self.assertEqual(vendor.calls, [("state", (vendor.STATE_ON,))])
+
+    def test_confirmed_manual_home_waits_for_estop_reset_before_power_and_home(self):
+        vendor = bc_profile()
+        vendor.status.estop = True
+        vendor.status.enabled = False
+        vendor.status.task_state = vendor.STATE_ESTOP
+        controller = Controller(module=vendor)
+        action = "machine.power-and-home"
+        self.assertTrue(controller.poll()["capabilities"][action])
+        self.assertFalse(controller.poll()["capabilities"]["program.home-and-run"])
+        self.assertFalse(controller.dispatch(action, {"clearanceConfirmed": False}))
+        self.assertEqual(vendor.calls, [])
+        self.assertTrue(controller.dispatch(action, {"clearanceConfirmed": True}))
+        self.assertEqual(vendor.calls, [("state", (vendor.STATE_ESTOP_RESET,))])
+        vendor.confirm(apply=False)
+        controller.poll()
+        self.assertEqual(len(vendor.calls), 1)
+        vendor.confirm()
+        controller.poll()
+        self.assertEqual(vendor.calls[-1], ("state", (vendor.STATE_ON,)))
+        for method in ("mode", "teleop_enable", "home"):
+            vendor.confirm()
+            controller.poll()
+            self.assertEqual(vendor.calls[-1][0], method)
+        self.assertEqual(vendor.calls[-1], ("home", (-1,)))
+        vendor.confirm()
+        self.assertEqual(controller.poll()["commandState"], "completed")
+
+    def test_unreleased_estop_cannot_advance_to_enable_or_home(self):
+        vendor = bc_profile()
+        vendor.status.estop = True
+        vendor.status.enabled = False
+        vendor.status.task_state = vendor.STATE_ESTOP
+        clock = FakeClock()
+        controller = Controller(module=vendor, clock=clock)
+        self.assertTrue(controller.dispatch("machine.power-and-home", {"clearanceConfirmed": True}))
+        vendor.confirm(apply=False)
+        clock.now = 11
+        self.assertEqual(controller.poll()["commandState"], "unknown")
+        self.assertEqual(vendor.calls, [("state", (vendor.STATE_ESTOP_RESET,))])
+
+    def test_bc_homing_preserves_acceptance_direction_sequence_and_braking_checks(self):
+        controller = Controller(module=bc_profile())
+        self.assertTrue(controller.poll()["capabilities"]["machine.home-all"])
+        for key, value in (
+            (("BETTERCNC_HOMING", "MOTOR_DIRECTIONS_VERIFIED"), "NO"),
+            (("BETTERCNC_HOMING", "MOTOR_MAPPING_VERIFIED"), "NO"),
+            (("BETTERCNC_HOMING", "TRAVEL_SOURCE"), "UNCONFIRMED"),
+            (("BETTERCNC_HOMING", "TRAVEL_Z_MM"), "20"),
+            (("JOINT_2", "STEP_SCALE"), "320"),
+            (("JOINT_1", "HOME_SEARCH_VEL"), "2"),
+            (("JOINT_2", "HOME_SEQUENCE"), "2"),
+            (("JOINT_2", "HOME_OFFSET"), "5"),
+            (("JOINT_2", "HOME_BACKOFF_VEL"), "0"),
+            (("JOINT_0", "MAX_ACCELERATION"), "1"),
+        ):
+            with self.subTest(key=key, value=value):
+                vendor = bc_profile()
+                vendor.ini_values[key] = value
+                controller = Controller(module=vendor)
+                self.assertFalse(controller.poll()["capabilities"]["machine.home-all"])
+                self.assertFalse(controller.dispatch("machine.home-all"))
+                self.assertEqual(vendor.calls, [])
+
+    def test_sequential_bc_homing_has_a_bounded_longer_completion_window(self):
+        vendor = bc_profile()
+        clock = FakeClock()
+        controller = Controller(module=vendor, clock=clock)
+        self.assertTrue(controller.dispatch("machine.home-all"))
+        vendor.confirm(apply=False)
+        vendor.status.joint[2]["homing"] = True
+        vendor.status.inpos = False
+        clock.now = 600
+        self.assertEqual(controller.poll()["commandState"], "sent")
+        clock.now = 901
+        self.assertEqual(controller.poll()["commandState"], "unknown")
+        self.assertEqual(vendor.calls, [("home", (-1,))])
 
     def test_home_all_finishes_when_only_configured_xyz_finish(self):
         vendor = six_joint_vendor()

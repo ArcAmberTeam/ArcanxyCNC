@@ -1,15 +1,15 @@
 import { test, expect, type Page } from '@playwright/test'
 import type { AxisCount, AxisOperation, AxisProfileStatus } from '../bridge'
 
-async function connect(page: Page, axes = ['X', 'Y', 'Z', 'B', 'C'], overview = false) {
-  await page.addInitScript(enabledAxes => {
+async function connect(page: Page, axes = ['X', 'Y', 'Z', 'B', 'C'], overview = false, feedLimit = 600) {
+  await page.addInitScript(({ enabledAxes, feedLimit }) => {
     const calls: unknown[] = []
     const listeners = new Set<(state: unknown) => void>()
     let state = {
       serviceConnected: true, connected: true, canJog: true, jogMode: 'world', canSetPower: true, powered: true, canEstop: true, estop: false, jogging: false,
-      axes: Object.fromEntries(enabledAxes.map(axis => [axis, { maxFeed: 600, unit: 'ABC'.includes(axis) ? 'deg' : 'mm' }])),
+      axes: Object.fromEntries(enabledAxes.map(axis => [axis, { maxFeed: feedLimit, unit: 'ABC'.includes(axis) ? 'deg' : 'mm' }])),
       activeAxes: enabledAxes.map(name => ({ name, unit: 'ABC'.includes(name) ? 'deg' : 'mm',
-        min: name === 'X' ? 0 : -10, max: name === 'X' ? null : 10, maxFeed: 600 })),
+        min: name === 'X' ? 0 : -10, max: name === 'X' ? null : 10, maxFeed: feedLimit })),
       readings: { spindleRpm: 784, spindleTarget: 800, spindleDirection: 0, spindleMin: 100, spindleMax: 3000,
         canForward: true, canReverse: true, canStopSpindle: true, flood: false, canSetFlood: true,
         feedRatio: 1, feedMax: 1.5, canSetFeed: true, workSystem: 'G54', rtcpModel: null, rtcpGeometry: {},
@@ -39,10 +39,21 @@ async function connect(page: Page, axes = ['X', 'Y', 'Z', 'B', 'C'], overview = 
         emergencyStop: async () => { calls.push('estop') },
       },
     })
-  }, axes)
+  }, { enabledAxes: axes, feedLimit })
   await page.goto('/')
   await page.getByRole('button', { name: '控制', exact: true }).click()
   if (!overview) await page.getByRole('button', { name: /^移动控制/ }).click()
+}
+
+for (const feedLimit of [30, 600, 900, 1200]) {
+  test(`linear jogging requests 900 mm/min within the ${feedLimit} mm/min machine limit`, async ({ page }) => {
+    await connect(page, ['X', 'Y', 'Z'], false, feedLimit)
+    await page.getByRole('button', { name: 'Z 轴正向' }).focus()
+    await page.keyboard.down('Space')
+    await page.keyboard.up('Space')
+    const calls = await page.evaluate(() => (window as unknown as { controlTestCalls: unknown[] }).controlTestCalls)
+    expect(calls.slice(-2)).toEqual([{ axis: 'Z', direction: 1, feedRate: Math.min(900, feedLimit) }, 'stop'])
+  })
 }
 
 test('manual power control uses explicit enable and disable without homing', async ({ page }) => {
@@ -136,7 +147,7 @@ test('axis directions map to the requested controls and mouse release stops', as
     await page.mouse.up()
     await expect(button).toHaveAttribute('aria-pressed', 'false')
     const calls = await page.evaluate(() => (window as unknown as { controlTestCalls: unknown[] }).controlTestCalls)
-    expect(calls).toContainEqual({ axis, direction, feedRate: 'BC'.includes(axis) ? 30 : 100 })
+    expect(calls).toContainEqual({ axis, direction, feedRate: 'BC'.includes(axis) ? 30 : 600 })
     expect(calls.at(-1)).toBe('stop')
   }
 })
@@ -154,7 +165,7 @@ test('XY controls place X vertically and Y horizontally with matching commands',
     await page.keyboard.down('Space')
     await page.keyboard.up('Space')
     const calls = await page.evaluate(() => (window as unknown as { controlTestCalls: unknown[] }).controlTestCalls)
-    expect(calls.slice(-2)).toEqual([{ axis, direction, feedRate: 100 }, 'stop'])
+    expect(calls.slice(-2)).toEqual([{ axis, direction, feedRate: 600 }, 'stop'])
   }
 })
 
@@ -175,11 +186,11 @@ test('long pointer and keyboard holds keep one jog active until release', async 
     }
     await page.waitForTimeout(1200)
     await expect(button).toHaveAttribute('aria-pressed', 'true')
-    expect((await calls()).slice(before)).toEqual([{ axis: 'X', direction: 1, feedRate: 100 }])
+    expect((await calls()).slice(before)).toEqual([{ axis: 'X', direction: 1, feedRate: 600 }])
     if (input === 'pointer') await page.mouse.up()
     else await page.keyboard.up('Space')
     await expect(button).toHaveAttribute('aria-pressed', 'false')
-    expect((await calls()).slice(before)).toEqual([{ axis: 'X', direction: 1, feedRate: 100 }, 'stop'])
+    expect((await calls()).slice(before)).toEqual([{ axis: 'X', direction: 1, feedRate: 600 }, 'stop'])
   }
 })
 
