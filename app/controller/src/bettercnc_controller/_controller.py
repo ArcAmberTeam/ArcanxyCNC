@@ -497,8 +497,10 @@ class Controller:
                     "state",
                     self._constant("STATE_ESTOP_RESET"),
                     guard="homeReset",
-                    expected=lambda: not self._snapshot["estop"]
-                    and self._snapshot["taskState"] in ("off", "estop-reset"),
+                    expected=lambda: (
+                        not self._snapshot["estop"]
+                        and self._snapshot["taskState"] in ("off", "estop-reset")
+                    ),
                 )
             )
         if enable:
