@@ -128,7 +128,7 @@ onUnmounted(() => emit('stop'))
       <div v-else class="axis-modules" :class="{ 'linear-only': !rotaryPads.length }">
         <section v-if="xy.length" class="axis-module" aria-labelledby="xy-title">
           <h2 id="xy-title">{{ xy.join('') }}</h2>
-          <AxisJogPad :label="xy.join('')" :vertical-axis="xy.includes('Y') ? 'Y' : 'X'" :horizontal-axis="xy.length === 2 ? 'X' : undefined" :state="state" @start="start" @stop="emit('stop')" />
+          <AxisJogPad :label="xy.join('')" :vertical-axis="xy.includes('X') ? 'X' : 'Y'" :horizontal-axis="xy.length === 2 ? 'Y' : undefined" :state="state" @start="start" @stop="emit('stop')" />
         </section>
 
         <section v-if="displayedAxes.includes('Z')" class="axis-module" aria-labelledby="z-title">

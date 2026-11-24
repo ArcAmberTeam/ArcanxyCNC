@@ -141,6 +141,23 @@ test('axis directions map to the requested controls and mouse release stops', as
   }
 })
 
+test('XY controls place X vertically and Y horizontally with matching commands', async ({ page }) => {
+  await connect(page, ['X', 'Y', 'Z'])
+  const pad = page.getByRole('group', { name: 'XY 轴点动', exact: true })
+  for (const [position, axis, direction, label] of [
+    ['up', 'X', 1, 'X 轴正向'], ['down', 'X', -1, 'X 轴负向'],
+    ['left', 'Y', -1, 'Y 轴负向'], ['right', 'Y', 1, 'Y 轴正向'],
+  ] as const) {
+    const button = pad.locator(`.jog-${position}`)
+    await expect(button).toHaveAccessibleName(label)
+    await button.focus()
+    await page.keyboard.down('Space')
+    await page.keyboard.up('Space')
+    const calls = await page.evaluate(() => (window as unknown as { controlTestCalls: unknown[] }).controlTestCalls)
+    expect(calls.slice(-2)).toEqual([{ axis, direction, feedRate: 100 }, 'stop'])
+  }
+})
+
 test('long pointer and keyboard holds keep one jog active until release', async ({ page }) => {
   await connect(page, ['X', 'Y', 'Z'])
   const button = page.getByRole('button', { name: 'X 轴正向' })

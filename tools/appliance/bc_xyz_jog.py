@@ -14,6 +14,10 @@ ORIGINAL = {
     "bc-inputs.hal": "ce1e5756a3362f4732b88e20261929253691bb19298093f3fafa1fc0d46c905f",
     "bc-xyz-limits.hal": "4b0f519b5dfb7c9e3408ec6b2164fa98e4ceee89ca22ca693fcfb2e2db067470",
 }
+PREVIOUS_JOG = {
+    "axis-3.ini": "282a07dafa472ac87f9237b22b3994c3184fb77fd8e79a3c64485771d43171e1",
+    HAL: "9d35e7ba7b7731e76b02eb07fec797a04d54bfc94e17b44d2dd75f21f3d66b99",
+}
 
 
 # --------#
@@ -103,6 +107,11 @@ def validate_destination(files, prepared):
         and files.get(HAL) == prepared[HAL]
     ):
         return "already-current"
+    if all(
+        hashlib.sha256(files.get(name, b"")).hexdigest() == digest
+        for name, digest in PREVIOUS_JOG.items()
+    ):
+        return "correct-mapping"
     if (
         hashlib.sha256(files.get("axis-3.ini", b"")).hexdigest()
         != ORIGINAL["axis-3.ini"]

@@ -142,8 +142,21 @@ class BcXyzJogTests(unittest.TestCase):
                 (section.getfloat("MIN_LIMIT"), section.getfloat("MAX_LIMIT")), limits
             )
             self.assertEqual(ini[f"AXIS_{axis}"].getfloat("MAX_VELOCITY"), 0.5)
+            stepgen = (1, 0, 2)[joint]
             self.assertIn(
-                f"joint.{joint}.amp-enable-out => hm2_7i92.0.stepgen.{joint:02}.enable",
+                f"joint.{joint}.amp-enable-out => hm2_7i92.0.stepgen.{stepgen:02}.enable",
+                hal,
+            )
+            self.assertIn(
+                f"joint.{joint}.motor-pos-cmd => hm2_7i92.0.stepgen.{stepgen:02}.position-cmd",
+                hal,
+            )
+            self.assertIn(
+                f"hm2_7i92.0.stepgen.{stepgen:02}.position-fb => joint.{joint}.motor-pos-fb",
+                hal,
+            )
+            self.assertIn(
+                f"hm2_7i92.0.stepgen.{stepgen:02}.position-scale [JOINT_{joint}]STEP_SCALE",
                 hal,
             )
             self.assertIn(
@@ -170,6 +183,61 @@ class BcXyzJogTests(unittest.TestCase):
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertIn("already-current", again.stdout)
         self.assertEqual(self.contents(), after)
+
+    def installed_jog(self):
+        installation.write_fixture(
+            self.machine, installation.FIXTURE.with_name("bc-xyz-jog-installed.json")
+        )
+        (self.config / "launcher.json").write_text(
+            json.dumps({"ini": "/etc/betterlinuxcnc/machine/axis-3.ini"})
+        )
+
+    def test_corrects_captured_jog_outputs_without_changing_inputs_or_ini(self):
+        self.installed_jog()
+        before = self.contents()
+        launcher = (self.config / "launcher.json").read_bytes()
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = self.contents()
+        self.assertEqual(set(after), set(before))
+        for name, content in before.items():
+            if name != "bc-xyz-jog.hal":
+                self.assertEqual(after[name], content)
+        self.assertEqual((self.config / "launcher.json").read_bytes(), launcher)
+        hal = after["bc-xyz-jog.hal"].decode()
+        for joint, axis, stepgen in ((0, "x", 1), (1, "y", 0), (2, "z", 2)):
+            self.assertIn(
+                f"net {axis}-command joint.{joint}.motor-pos-cmd => hm2_7i92.0.stepgen.{stepgen:02}.position-cmd",
+                hal,
+            )
+        self.assertEqual(
+            [line for line in hal.splitlines() if "stepgen" not in line][1:],
+            [
+                line
+                for line in before["bc-xyz-jog.hal"].decode().splitlines()
+                if "stepgen" not in line
+            ][1:],
+        )
+        again = self.invoke()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("already-current", again.stdout)
+        self.assertEqual(self.contents(), after)
+
+    def test_mapping_correction_rejects_onsite_edits_and_backup_failure(self):
+        self.installed_jog()
+        for name in ("axis-3.ini", "bc-xyz-jog.hal"):
+            path = self.machine / name
+            original = path.read_bytes()
+            path.write_bytes(original + b"\n# local adjustment\n")
+            before = self.contents()
+            result = self.invoke()
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(self.contents(), before)
+            path.write_bytes(original)
+        before = self.contents()
+        result = self.invoke("backup")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.contents(), before)
 
     def test_rejects_changed_profiles_without_overwriting_tuning(self):
         for name in ("axis-3.ini", "axis-5.ini", "bc-inputs.hal", "bc-xyz-limits.hal"):

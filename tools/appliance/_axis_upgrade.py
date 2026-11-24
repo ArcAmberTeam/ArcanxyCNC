@@ -396,7 +396,7 @@ def _prepare_xyz_jog(root, config):
         if selected not in (
             "/etc/betterlinuxcnc/machine/axis-5.ini",
             "/etc/betterlinuxcnc/machine/axis-3.ini",
-        ) or (state != "already-current" and not selected.endswith("axis-5.ini")):
+        ) or (state == "prepare" and not selected.endswith("axis-5.ini")):
             raise ValueError("Launcher does not select the captured BC installation")
         if state == "already-current":
             return state
